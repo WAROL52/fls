@@ -193,7 +193,8 @@ describe("tabulations : le fond doit couvrir l'indentation", () => {
     const content = out.split("\n").filter((l) => l.includes("<H>"));
     expect(content).toHaveLength(expected);
     for (const l of content) {
-      expect(l.startsWith(BG), l).toBe(true);
+      // en mode --tree, le contenu d'un fichier de dossier est précédé du préfixe d'arbre (sans fond)
+      expect(l.replace(/^\x1b\[2m[^\x1b]*\x1b\[0m/, "").startsWith(BG), l).toBe(true);
       expect(l.endsWith(EOL), l).toBe(true);
     }
     expect(out).not.toContain("\t");
@@ -208,12 +209,12 @@ describe("tabulations : le fond doit couvrir l'indentation", () => {
 
   it("fls --tree --colored : indentation par tabulations peinte", async () => {
     const out = await runColored(["--tree", "a.ts"], { "a.ts": ts });
-    assertPainted(out, 6);
+    assertPainted(out, 5);
     expect(out).toContain("<H>        if (x) {</H>");
   });
 
   it("fls <dossier> --tree --colored", async () => {
-    assertPainted(await runColored(["--tree", "d"], { "d/a.ts": ts }), 6);
+    assertPainted(await runColored(["--tree", "d"], { "d/a.ts": ts }), 5);
   });
 
   it("@read --colored : tabulations développées", async () => {
@@ -236,6 +237,72 @@ describe("tabulations : le fond doit couvrir l'indentation", () => {
       expect(l.startsWith("\x1b[42m") || l.startsWith("\x1b[48;2;30;60;30m") || l.startsWith("\x1b[48;2;60;30;30m")).toBe(true);
       expect(l.endsWith(EOL)).toBe(true);
     }
+  });
+});
+
+describe("fls --tree --colored : contenu aligné sur la colonne du nom de fichier", () => {
+  const strip = (t: string) => t.replace(/\x1b\[[0-9;]*[mK]/g, "").replace(/<\/?H>/g, "");
+  const BG = "\x1b[48;2;36;36;36m";
+  const EOL = "\x1b[K\x1b[0m";
+  const files = {
+    "docs/adr/0001.md": "# titre\n\ntexte\n",
+    "docs/adr/0002.md": "autre\n",
+    "docs/guide.md": "un\ndeux\n",
+    "docs/sub/deep/x.ts": "const x = 1;\n",
+    "docs/z.txt": "fin\n",
+  };
+  const render = async (argv: string[], f: Record<string, string>, tty: boolean) => {
+    const io = fake(sb(f), { stdoutTTY: tty });
+    await fls.main(argv, io.io);
+    return io.out.map(String).join("");
+  };
+
+  it("sortie colorée sans ANSI == sortie brute, octet pour octet (arbre imbriqué, │ de continuation)", async () => {
+    const colored = await render(["--tree", "--colored", "docs"], files, true);
+    const plain = await render(["--tree", "--no-color", "docs"], files, false);
+    expect(strip(colored)).toBe(plain);
+  });
+
+  it("le fond démarre exactement à la colonne du nom de fichier", async () => {
+    const colored = await render(["--tree", "--colored", "docs"], files, true);
+    const plain = (await render(["--tree", "--no-color", "docs"], files, false)).split("\n");
+    const lines = colored.split("\n");
+    expect(lines).toHaveLength(plain.length);
+    let checked = 0;
+    lines.forEach((l, i) => {
+      if (!l.includes(BG)) return;
+      checked += 1;
+      const before = strip(l.slice(0, l.indexOf(BG)));
+      // colonne du fond = largeur du préfixe de l'arbre ; le texte visible qui suit est celui de la sortie brute
+      expect(plain[i].startsWith(before), plain[i]).toBe(true);
+      expect(strip(l).slice(before.length)).toBe(plain[i].slice(before.length));
+      expect(before).toMatch(/^[ │]*$/);
+      expect(before.length).toBeGreaterThan(0);
+    });
+    expect(checked).toBe(8); // 3 + 1 + 2 + 1 + 1 lignes de contenu
+  });
+
+  it("pas de ligne vide avec fond en fin de sortie ; \\n final conservé comme en brut", async () => {
+    const out = await render(["--tree", "--colored", "docs"], { "docs/a.md": "x\n" }, true);
+    expect(out.endsWith(`${EOL}\n`)).toBe(true);
+    expect(out.endsWith(`\n${BG}${EOL}\n`)).toBe(false);
+    expect(strip(out).endsWith("x\n")).toBe(true);
+  });
+
+  it("exemple de la capture : fichier unique dans un sous-dossier, contenu sous le nom", async () => {
+    const out = strip(await render(["--tree", "--colored", "docs"], { "docs/adr/a.md": "# T\n\nligne\n" }, true));
+    expect(out).toBe("docs\n└── adr\n    └── a.md\n        # T\n        \n        ligne\n");
+  });
+
+  it("fichier à la racine de l'arbre : contenu en colonne 0, fond dès le premier caractère", async () => {
+    const out = await render(["--tree", "--colored", "a.ts"], { "a.ts": "x\n" }, true);
+    const content = out.split("\n").find((l) => l.includes("<H>x</H>")) as string;
+    expect(content.startsWith(BG)).toBe(true);
+  });
+
+  it("tabulations : colonne de départ = largeur du préfixe de l'arbre", async () => {
+    const out = strip(await render(["--tree", "--colored", "d"], { "d/a.ts": "\tx\n" }, true));
+    expect(out).toBe("d\n└── a.ts\n        x\n"); // préfixe de 4 colonnes, la tabulation va jusqu'à la colonne 8 : x en colonne 8
   });
 });
 

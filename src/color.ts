@@ -238,7 +238,9 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
   const p = pal(t);
   // Parse simple treecat: lignes structure "prefix+connector+name" ou "prefix+content" ou racine ou "-> ..."
   // On highlight le contenu fichier par blocs.
-  const lines = raw.split("\n");
+  // Le \n final n'est pas une ligne de contenu (sinon : ligne vide avec fond en fin de sortie).
+  const trailingNewline = raw.endsWith("\n");
+  const lines = (trailingNewline ? raw.slice(0, -1) : raw).split("\n");
   const out: string[] = [];
   let i = 0;
   // root line
@@ -252,8 +254,10 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
   const flushFile = async () => {
     if (inFile === null) return;
     const lang = langFromPath(inFile);
-    const hl = await highlightBlock(fileContent, lang, p);
-    for (const l of hl) out.push(p.bgCode.wrap(l));
+    // Le contenu reste à la colonne du nom de fichier (comme en sortie brute) : le préfixe de
+    // l'arbre est gardé, sans fond ; le fond ne démarre qu'à la colonne du nom.
+    const hl = await highlightBlock(fileContent, lang, p, filePrefix.length);
+    for (const l of hl) out.push(p.dim(filePrefix) + p.bgCode.wrap(l));
     inFile = null; fileContent = []; filePrefix = "";
   };
   while (i < lines.length) {
@@ -306,5 +310,5 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
     fileContent.push(line); inFile = rootLabel; filePrefix = ""; i += 1;
   }
   await flushFile();
-  return out.join("\n");
+  return out.join("\n") + (trailingNewline ? "\n" : "");
 }
