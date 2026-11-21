@@ -665,8 +665,15 @@ describe("sources et sorties", () => {
     expect(clipOut.clip.text).toBe(clipOut.text);
   });
 
-  it("sans script et sans stdin", () => {
+  it("sans argument : affiche l'usage", () => {
     const r = run([], {}, { tty: true });
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("Usage :");
+    expect(r.errText).toBe("");
+  });
+
+  it("expand sans script : erreur d'usage", () => {
+    const r = run(["expand"], {}, { tty: true });
     expect(r.code).toBe(2);
     expect(r.errText).toContain("usage_error");
     expect(r.errText).toContain("aucun script");

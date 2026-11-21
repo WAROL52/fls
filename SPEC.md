@@ -8,6 +8,7 @@ Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lan
 
 | Forme | Effet |
 |---|---|
+| `fls` | affiche l'usage (comme `--help`) |
 | `fls <chemin...>` | lecture rapide : équivaut à un `@read` par chemin |
 | `fls <<'FLS' … FLS` | script lu sur l'entrée standard |
 | `fls --file script.fls` | script lu dans un fichier (relatif au dossier courant) |
@@ -20,7 +21,7 @@ Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lan
 1. `--help` / `-h` affiche l'usage ; `--version` affiche la version.
 2. Si le **premier argument positionnel** est un nom de sous-commande, c'est la sous-commande (pour lire un fichier nommé `log`, écrire `./log`).
 3. Sinon, s'il y a des chemins ou `--paths-from` : **lecture rapide**.
-4. Sinon : **exécution de script**. Source du script : `--file`, puis `--clip` / `--clip-in`, puis l'entrée standard. Si l'entrée standard est un terminal : erreur `usage_error`.
+4. Sinon : **exécution de script**. Source du script : `--file`, puis `--clip` / `--clip-in`, puis l'entrée standard. Sans argument et sans source (entrée standard terminal), `fls` affiche l'usage (code 0) ; pour une sous-commande comme `fls expand`, l'absence de script reste une erreur `usage_error`.
 
 Avec des chemins, `--clip` ne lit pas le presse-papiers : il y **copie** seulement le rapport (`fls src/ --clip` copie le contexte du projet).
 

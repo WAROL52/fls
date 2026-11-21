@@ -504,6 +504,9 @@ function scriptText(args: Args, io: Io): string {
   return io.readStdin();
 }
 
+const hasScriptSource = (args: Args, io: Io): boolean =>
+  args.values.has("file") || args.flags.has("clip") || args.flags.has("clip-in") || !io.stdinIsTTY;
+
 const cmdRun = (args: Args, io: Io): Report => execAndReport(args, io, parseScript(scriptText(args, io)), args.flags.has("dry-run"));
 const cmdExpand = (args: Args, io: Io): Report => ({ text: serialize(parseScript(scriptText(args, io))), code: 0 });
 
@@ -528,6 +531,8 @@ export function route(args: Args, io: Io): Report {
   const [first, ...rest] = args.positional;
   if (first !== undefined && Object.hasOwn(SUBCOMMANDS, first)) return SUBCOMMANDS[first]({ ...args, positional: rest }, io);
   if (args.positional.length > 0 || args.values.has("paths-from")) return cmdQuickRead(args, io);
+  // `fls` seul, sans aucune source de script : affiche l'usage plutôt qu'une erreur.
+  if (!hasScriptSource(args, io)) return { text: usage(), code: 0 };
   return cmdRun(args, io);
 }
 
