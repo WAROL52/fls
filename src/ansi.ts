@@ -97,3 +97,41 @@ export function safeTruncate(text: string, limit: number): { text: string; trunc
 	}
 	return { text: text.slice(0, cut), truncated: true };
 }
+
+const SGR = /\x1b\[[0-9;]*m/y;
+
+/**
+ * Découpe une ligne (éventuellement stylée en ANSI) en lignes visuelles de `width` colonnes
+ * au plus : chaque ligne est refermée par un reset et la suivante rouvre les styles actifs.
+ * Les lignes suivantes commencent par `indent` (comptée dans la largeur). Une colonne = un
+ * point de code (pas de gestion des caractères larges ou combinants).
+ */
+export function wrapAnsi(line: string, width: number, indent = ""): string[] {
+  if (!Number.isFinite(width) || width < 1) return [line];
+  const rows: string[] = [];
+  let active = "";
+  let cur = "";
+  let col = 0;
+  let i = 0;
+  while (i < line.length) {
+    SGR.lastIndex = i;
+    const seq = SGR.exec(line);
+    if (seq !== null) {
+      cur += seq[0];
+      active = seq[0] === RESET ? "" : active + seq[0];
+      i += seq[0].length;
+      continue;
+    }
+    if (col === width) {
+      rows.push(active === "" ? cur : cur + RESET);
+      cur = active + indent;
+      col = indent.length;
+    }
+    const ch = String.fromCodePoint(line.codePointAt(i) as number);
+    cur += ch;
+    col += 1;
+    i += ch.length;
+  }
+  rows.push(cur);
+  return rows;
+}

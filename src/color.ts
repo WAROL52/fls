@@ -1,4 +1,4 @@
-import { applyLineBg, palette, safeTruncate, type ColorLevel, type Palette } from "./ansi.ts";
+import { applyLineBg, palette, safeTruncate, wrapAnsi, type ColorLevel, type Palette } from "./ansi.ts";
 import { FlsError } from "./errors.ts";
 import { highlightCode, langFromPath } from "./highlight.ts";
 import type { Args, Io } from "./types.ts";
@@ -11,6 +11,8 @@ export interface ColorTargets {
   file: boolean;
   clip: boolean;
   level: ColorLevel;
+  /** Largeur du terminal à respecter (lignes longues repliées dans le bloc) ; absente : aucun repli. */
+  columns?: number;
 }
 
 const THEME = "github-dark";
@@ -31,12 +33,19 @@ export function resolveTargets(args: Args, io: Io): ColorTargets {
   const off = mode === "never" || (mode === "auto" && noColor);
   const level: ColorLevel = off ? 0 : 3;
   const auto = (tty: boolean | undefined): boolean => !off && (force || (mode === "auto" && tty === true));
+  const file = !off && force;
+  const clip = !off && force;
+  // Le repli suit la largeur du terminal : il n'a pas de sens si la sortie colorée part aussi
+  // dans un fichier ou le presse-papiers.
+  const otherSink = (file && args.values.has("output")) || (clip && (args.flags.has("clip") || args.flags.has("clip-out")));
+  const stdout = auto(io.stdoutIsTTY);
   return {
-    stdout: auto(io.stdoutIsTTY),
+    stdout,
     stderr: auto(io.stderrIsTTY),
-    file: !off && force,
-    clip: !off && force,
+    file,
+    clip,
     level,
+    columns: stdout && !otherSink ? io.columns : undefined,
   };
 }
 
@@ -69,7 +78,12 @@ function highlightGrepMatch(text: string, pattern: string | null, p: Palette): s
   return text.slice(0, idx) + p.match(text.slice(idx, idx + pattern.length)) + text.slice(idx + pattern.length);
 }
 
-function colorGrepLine(line: string, p: Palette, pattern: string | null): string {
+/** Lignes visuelles d'une ligne à fond, repliées à la largeur du terminal (continuation indentée). */
+function bgRows(bg: Palette["bgCode"], text: string, columns: number | undefined, indent: string): string {
+  return wrapAnsi(text, room(columns, 0), indent).map((row) => bg.wrap(row)).join("\n");
+}
+
+function colorGrepLine(line: string, p: Palette, pattern: string | null, columns: number | undefined): string {
   // fichier:ligne: match  or fichier-ligne- context  or --
   if (line === "--") return p.bgCode.wrap(p.dim(line));
   const m = /^(.+?)([:\-])(\d+)([:\-])(.*)$/.exec(line);
@@ -77,7 +91,7 @@ function colorGrepLine(line: string, p: Palette, pattern: string | null): string
   const [, file, a, ln, b, rest] = m;
   const isMatch = b === ":";
   const content = isMatch ? highlightGrepMatch(rest, pattern, p) : p.dim(rest);
-  return p.bgCode.wrap(p.cyan(file) + p.dim(a) + p.yellow(ln) + p.dim(b) + content);
+  return bgRows(p.bgCode, p.cyan(file) + p.dim(a) + p.yellow(ln) + p.dim(b) + content, columns, "    ");
 }
 
 const TAB_WIDTH = 8;
@@ -109,7 +123,35 @@ async function highlightBlock(rawLines: string[], lang: string, p: Palette, star
   }
 }
 
-async function colorReadBody(body: string, p: Palette): Promise<string> {
+const GUTTER_SEP = " │ ";
+const MIN_WRAP = 20;
+
+/** Largeur disponible pour le texte d'une ligne visuelle (marge d'une colonne contre le repli du terminal). */
+function room(columns: number | undefined, used: number): number {
+  return columns === undefined ? Infinity : Math.max(columns - used - 1, MIN_WRAP);
+}
+
+/**
+ * Bloc de code : numéro de ligne (affiché sur la première ligne visuelle seulement), puis le code,
+ * replié à la largeur du terminal. `prefix` est le préfixe de l'arbre (sans fond) : le fond
+ * commence à la colonne du nom de fichier.
+ */
+async function codeBlockRows(codes: string[], nums: number[], lang: string, prefix: string, p: Palette, columns: number | undefined): Promise<string[]> {
+  /* v8 ignore next */
+  if (codes.length === 0) return [];
+  const gw = String(Math.max(...nums)).length;
+  const startCol = prefix.length + gw + GUTTER_SEP.length;
+  const hl = await highlightBlock(codes, lang, p, startCol);
+  const avail = room(columns, startCol);
+  return hl.flatMap((line, i) =>
+    wrapAnsi(line, avail).map((part, k) => {
+      const num = k === 0 ? String(nums[i]).padStart(gw) : " ".repeat(gw);
+      return p.dim(prefix) + p.bgCode.wrap(p.dim(num + GUTTER_SEP) + part);
+    }),
+  );
+}
+
+async function colorReadBody(body: string, p: Palette, columns: number | undefined): Promise<string> {
   /* v8 ignore next */
   if (p.level === 0) return body;
   // blocs === path (...) === ... === fin ===
@@ -117,7 +159,7 @@ async function colorReadBody(body: string, p: Palette): Promise<string> {
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
-    const m = /^=== (.+?)(?: \([^)]+\))? ===$/.exec(lines[i]);
+    const m = /^=== (.+?)(?: \(([^)]+)\))? ===$/.exec(lines[i]);
     if (m !== null && !lines[i].startsWith("=== fin ===")) {
       out.push(p.bold(lines[i]));
       i += 1;
@@ -126,23 +168,19 @@ async function colorReadBody(body: string, p: Palette): Promise<string> {
         content.push(lines[i]);
         i += 1;
       }
-      const filePath = m[1];
-      const lang = langFromPath(filePath);
-      // line-numbers format: "  1 | code"
-      const numbered = content.length > 0 && /^\s*\d+ \| /.test(content[0]);
-      if (numbered) {
-        const prefixes: string[] = [];
+      if (content.length === 1 && /^\[omis : .+\]$/.test(content[0])) out.push(p.dim(content[0]));
+      else {
+        const first = Number(/^lignes (\d+)-/.exec(m[2] ?? "")?.[1] ?? 1);
+        // --line-numbers : "  1 | code" ; sinon, numérotation à partir de la première ligne lue
+        const numbered = content.length > 0 && /^\s*\d+ \| /.test(content[0]);
+        const nums: number[] = [];
         const codes: string[] = [];
-        for (const l of content) {
-          const pm = /^(\s*\d+ \| )(.*)$/.exec(l);
-          if (pm !== null) { prefixes.push(pm[1]); codes.push(pm[2]); }
-          else { prefixes.push(""); codes.push(l); }
-        }
-        const hl = await highlightBlock(codes, lang, p, prefixes[0].length);
-        for (let k = 0; k < content.length; k++) out.push(p.bgCode.wrap(p.dim(prefixes[k]) + hl[k]));
-      } else {
-        const hl = await highlightBlock(content, lang, p);
-        out.push(...hl.map((l) => p.bgCode.wrap(l)));
+        content.forEach((l, k) => {
+          const pm = numbered ? /^\s*(\d+) \| (.*)$/.exec(l) : null;
+          nums.push(pm !== null ? Number(pm[1]) : (nums[k - 1] ?? first - 1) + 1);
+          codes.push(pm !== null ? pm[2] : l);
+        });
+        out.push(...(await codeBlockRows(codes, nums, langFromPath(m[1]), "", p, columns)));
       }
       if (i < lines.length && lines[i] === "=== fin ===") { out.push(p.bold(lines[i])); i += 1; }
       continue;
@@ -153,7 +191,7 @@ async function colorReadBody(body: string, p: Palette): Promise<string> {
   return out.join("\n");
 }
 
-async function colorEditBody(body: string, p: Palette): Promise<string> {
+async function colorEditBody(body: string, p: Palette, columns: number | undefined): Promise<string> {
   /* v8 ignore next */
   if (p.level === 0) return body;
   const lines = body.split("\n");
@@ -173,7 +211,7 @@ async function colorEditBody(body: string, p: Palette): Promise<string> {
       } catch { hl = chunk; }
       for (let k = 0; k < chunk.length; k++) {
         const code = hl[k] ?? chunk[k];
-        out.push(bg.wrap((sign === "+" ? p.green("+ ") : p.red("- ")) + code));
+        out.push(bgRows(bg, (sign === "+" ? p.green("+ ") : p.red("- ")) + code, columns, "  "));
       }
       continue;
     }
@@ -209,12 +247,12 @@ export async function colorizeReportText(text: string, t: ColorTargets): Promise
       const titleRest = m?.[2] ?? "";
       let bodyColored = body;
       if (body !== "") {
-        if (kind === "READ") bodyColored = await colorReadBody(body, p);
-        else if (kind === "EDIT") bodyColored = await colorEditBody(body, p);
+        if (kind === "READ") bodyColored = await colorReadBody(body, p, t.columns);
+        else if (kind === "EDIT") bodyColored = await colorEditBody(body, p, t.columns);
         else if (kind === "GREP") {
           const pm = /^"((?:[^"\\]|\\.)*)"/.exec(titleRest);
           const pat = pm ? pm[1].replace(/\\(.)/g, "$1") : null;
-          bodyColored = body.split("\n").map((l) => colorGrepLine(l, p, pat)).join("\n");
+          bodyColored = body.split("\n").map((l) => colorGrepLine(l, p, pat, t.columns)).join("\n");
         } else bodyColored = body;
       }
       out.push(bodyColored === "" ? headColored : `${headColored}\n${bodyColored}`);
@@ -256,8 +294,7 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
     const lang = langFromPath(inFile);
     // Le contenu reste à la colonne du nom de fichier (comme en sortie brute) : le préfixe de
     // l'arbre est gardé, sans fond ; le fond ne démarre qu'à la colonne du nom.
-    const hl = await highlightBlock(fileContent, lang, p, filePrefix.length);
-    for (const l of hl) out.push(p.dim(filePrefix) + p.bgCode.wrap(l));
+    out.push(...(await codeBlockRows(fileContent, fileContent.map((_, k) => k + 1), lang, filePrefix, p, t.columns)));
     inFile = null; fileContent = []; filePrefix = "";
   };
   while (i < lines.length) {

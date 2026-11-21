@@ -15,6 +15,7 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { isatty } from "node:tty";
 import { pathToFileURL } from "node:url";
@@ -37,12 +38,13 @@ import type {
   Result,
   RunMeta,
   Runner,
+  Snapshot,
   Spec,
   Token,
 } from "./types.ts";
 import { sha1, Workspace } from "./workspace.ts";
 
-export const VERSION = "1.1.0";
+export const VERSION = "1.2.0";
 const DEFAULT_MAX_SIZE = 1_048_576;
 const DEFAULT_MAX_OUTPUT = 200_000;
 
@@ -263,7 +265,44 @@ export async function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean)
   const header = `fls ${VERSION} | ${dry ? "dry-run" : `run ${id}`} | ${io.cwd} | ${now.toISOString()}`;
   const text = renderReport(header, results, footer);
   if (journaled) writeJournal(io, ws, id, now, pending, serialize(ops), text);
-  return { text, code: results.some((r) => r.status === "FAIL") ? 1 : 0 };
+  return { text, code: results.some((r) => r.status === "FAIL") ? 1 : 0, snapshot: { kind: "report", text } };
+}
+
+// ───────────────────────────── Dernière sortie : mémorisation et `fls last` ─────────────────────────────
+
+const lastFile = (io: Io): string | null => (io.cacheDir === undefined ? null : path.join(io.cacheDir, "last.json"));
+
+/** Mémorise la sortie non colorée ; un échec d'écriture (cache illisible, disque plein…) n'est jamais fatal. */
+export function saveLast(io: Io, snapshot: Snapshot): void {
+  const file = lastFile(io);
+  if (file === null) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ version: VERSION, date: io.now().toISOString(), cwd: io.cwd, snapshot }));
+  } catch {
+    // la mémorisation est un confort
+  }
+}
+
+export function loadLast(io: Io): Snapshot {
+  const file = lastFile(io);
+  const none = new FlsError("no_last_output", "aucune sortie mémorisée : lance d'abord une lecture ou un script");
+  if (file === null || !fs.existsSync(file)) throw none;
+  try {
+    const data = JSON.parse(fs.readFileSync(file, "utf8")) as { snapshot?: Snapshot };
+    if (data.snapshot?.kind === "report" || data.snapshot?.kind === "tree") return data.snapshot;
+  } catch {
+    // fichier corrompu : même message que « rien de mémorisé »
+  }
+  throw none;
+}
+
+/** Réaffiche la dernière sortie (sans rien réexécuter), recolorée et repliée à la largeur actuelle du terminal. */
+async function cmdLast(args: Args, io: Io): Promise<Report> {
+  const snap = loadLast(io);
+  if (snap.kind === "report") return { text: snap.text, code: 0 };
+  const roots = snap.roots.map((r) => (r === null ? null : { p: r.p, label: r.label, raw: Buffer.from(r.raw, "utf8") }));
+  return finishTree(args, io, new Workspace(io.cwd, DEFAULT_MAX_SIZE), roots, 0);
 }
 
 // ───────────────────────────── Journal : log et undo ─────────────────────────────
@@ -373,6 +412,7 @@ export function usage(): string {
     "  fls --dry-run                simule les effets sans rien écrire",
     "  fls undo [--run <id>]        annule le dernier run (ou un run précis)",
     "  fls log [--run <id>]         liste les runs ou affiche le détail d'un run",
+    "  fls last                     réaffiche la dernière sortie (sans réexécuter), à la largeur du terminal",
     "  fls spec                     référence complète de la syntaxe",
     "  fls help <directive>         aide d'une directive",
     "  fls init                     crée .flsignore et ajoute .fls/ au .gitignore",
@@ -600,6 +640,14 @@ async function cmdQuickTree(args: Args, io: Io): Promise<Report> {
       rendered.push(null);
     }
   }
+  const snapshot: Snapshot = { kind: "tree", roots: rendered.map((r) => (r === null ? null : { p: r.p, label: r.label, raw: r.raw.toString("utf8") })) };
+  return { ...(await finishTree(args, io, ws, rendered, code)), snapshot };
+}
+
+type TreeRoot = { p: string; label: string; raw: Buffer } | null;
+
+/** Assemble la sortie d'une lecture `--tree` : brute, ou colorée et repliée selon le terminal. */
+async function finishTree(args: Args, io: Io, ws: Workspace, rendered: TreeRoot[], code: number): Promise<Report> {
   const plain = Buffer.concat(rendered.map((r, i) => (i > 0 ? Buffer.concat([Buffer.from("\n"), r?.raw ?? Buffer.alloc(0)]) : (r?.raw ?? Buffer.alloc(0))))).toString("utf8");
   const targets = resolveTargets(args, io);
   const wantColor = targets.stdout || targets.file || targets.clip;
@@ -623,6 +671,7 @@ const SUBCOMMANDS: Record<string, (args: Args, io: Io) => Promise<Report>> = {
   expand: cmdExpand,
   undo: cmdUndo,
   log: cmdLog,
+  last: cmdLast,
   spec: cmdSpec as (args: Args, io: Io) => Promise<Report>,
   help: cmdHelp as (args: Args, io: Io) => Promise<Report>,
   init: cmdInit,
@@ -688,6 +737,7 @@ export async function emit(args: Args, io: Io, report: Report): Promise<void> {
     const clipShown = useColoredClip ? withTruncation(coloredBase as string, limit, true) : (plainBase.length > limit ? withTruncation(plainBase, limit, false) : plainBase);
     io.clipboard.write(clipShown);
   }
+  if (report.snapshot !== undefined) saveLast(io, report.snapshot);
 }
 
 export async function main(argv: string[], io: Io): Promise<number> {
@@ -734,7 +784,20 @@ export function createRealIo(stdinFd: number): Io {
     clipboard: createClipboard(realRunner),
     now: () => new Date(),
     newId: makeId,
+    cacheDir: cacheDirFor(process.env, os.homedir()),
+    columns: terminalColumns(isatty(1), process.stdout.columns),
   };
+}
+
+/** `$XDG_CACHE_HOME/fls`, sinon `~/.cache/fls`. */
+export function cacheDirFor(env: Record<string, string | undefined>, home: string): string {
+  const base = env.XDG_CACHE_HOME;
+  return path.join(base !== undefined && base !== "" ? base : path.join(home, ".cache"), "fls");
+}
+
+/** Largeur utilisable du terminal : seulement si stdout est un terminal qui la connaît. */
+export function terminalColumns(isTty: boolean, columns: number | undefined): number | undefined {
+  return isTty && columns !== undefined && columns > 0 ? columns : undefined;
 }
 
 export function isEntry(argv1: string | undefined, metaUrl: string): boolean {

@@ -11,3 +11,9 @@
 **Rapport** — Sortie d'une exécution : une entrée par directive (OK, FAIL, SKIP), puis un résumé.
 
 **Run** — Exécution journalisée d'un script ayant produit au moins un changement effectif ; annulable avec `undo`.
+
+**Gouttière** — Colonne de numéros de ligne (`12 │ `) affichée devant le contenu d'un fichier en sortie colorée. Le numéro n'apparaît que sur la première ligne visuelle d'une ligne repliée.
+
+**Ligne visuelle** — Une ligne telle qu'affichée par le terminal : une ligne de fichier trop longue en occupe plusieurs une fois repliée.
+
+**Dernière sortie** — Copie non colorée de la sortie de la dernière lecture ou du dernier script, mémorisée pour être réaffichée par `fls last` sans réexécution.

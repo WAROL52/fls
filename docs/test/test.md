@@ -21,6 +21,8 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 |---|---|
 | `src/fls.test.ts` | parseur, directives (`@tree`, `@read`, `@grep`, `@note`, `@edit`, écritures, `@delete`, `@move`), exécution et politique d'échec, sources et sorties, journal / `undo` / `log`, aide, `parseArgs` et `main`, presse-papiers, E/S réelles et point d'entrée |
 | `src/color.test.ts` | palette ANSI, modes de couleur, fond limité aux contenus de fichier, tabulations, `--tree --colored` sans coupe par défaut, coloration du rapport, de l'arbre et des diffs |
+| `src/wrap.test.ts` | `wrapAnsi`, numéros de ligne et repli à la largeur du terminal (`@read`, `--tree`, `@grep`, `@edit`), absence de repli vers fichier / presse-papiers ; utilise la vraie coloration Shiki |
+| `src/last.test.ts` | `fls last` : réaffichage sans réexécution, réajustement de la largeur, mémorisation, erreurs (`no_last_output`, cache corrompu ou illisible), `cacheDirFor`, `terminalColumns` |
 | `src/tree.test.ts` | `renderTree` (fichiers, dossiers, liens, illisibles, surcouche mémoire), `@read --tree`, `--tree` global, lecture rapide `fls --tree` |
 | `src/tree.e2e.test.ts` | parité octet pour octet avec `bin/treecat`, divergences volontaires de sécurité, mode script |
 | `src/highlight.test.ts` | coloration syntaxique (Shiki) |
@@ -62,7 +64,15 @@ Pour une correction de bug, ajouter un test qui échoue avant le correctif et pa
 |---|---|
 | Fond appliqué à tout le rapport (en-tête, usage, notes, arbre) | `fond (bg) limité aux contenus de fichier` |
 | Fond absent sous l'indentation par tabulations | `tabulations : le fond doit couvrir l'indentation` : plus de tabulation dans la sortie, chaque ligne de contenu commence par le fond et se termine par `ESC[K` |
+| Texte replié par le terminal : lignes longues qui sortent du bloc, numéro de ligne introuvable | `repli à la largeur du terminal` et `numéros de ligne (sortie colorée)` |
+| Affichage figé après un redimensionnement | `fls last : réaffichage sans réexécution` (largeur réajustée dans les deux sens) |
 | `fls src --tree --colored` coupé au milieu de l'arbre, sous-dossiers invisibles | `aucune coupe par défaut` : arbre de plus de 200 000 caractères complet, `--max-output-chars` explicite coupe toujours |
+
+## Tester l'affichage et `fls last`
+
+- La largeur du terminal est injectée : `Io.columns` (`undefined` hors terminal). Un test choisit `columns: 40` et vérifie que chaque ligne visuelle, ANSI retirés, fait au plus `columns - 1` colonnes, que le fond commence et finit chaque ligne et que les morceaux recollés redonnent la ligne source.
+- Le dossier de mémorisation est injecté : `Io.cacheDir`. `last.test.ts` construit une « session » (même dossier de travail et même cache d'une commande à l'autre) pour enchaîner une commande puis `fls last`.
+- Preuve de non-réexécution : modifier ou supprimer un fichier entre la commande et `fls last`, et constater que la sortie réaffichée est l'ancienne.
 
 ## Couverture
 

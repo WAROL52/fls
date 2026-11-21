@@ -34,7 +34,7 @@ function sb(files: Record<string, string | Buffer> = {}): string {
   return dir;
 }
 
-function fake(cwd: string, o: { tty?: boolean; stdoutTTY?: boolean; stderrTTY?: boolean; env?: Record<string, string | undefined>; clipboard?: string } = {}) {
+function fake(cwd: string, o: { tty?: boolean; stdoutTTY?: boolean; stderrTTY?: boolean; env?: Record<string, string | undefined>; clipboard?: string; columns?: number; cacheDir?: string } = {}) {
   const out: Array<string | Buffer> = [];
   const err: string[] = [];
   const clip = { text: o.clipboard ?? "" };
@@ -50,6 +50,8 @@ function fake(cwd: string, o: { tty?: boolean; stdoutTTY?: boolean; stderrTTY?: 
     clipboard: { read: () => clip.text, write: (t) => { clip.text = t; } },
     now: () => new Date("2026-11-19T10:00:00.123Z"),
     newId: () => "r1",
+    columns: o.columns,
+    cacheDir: o.cacheDir,
   };
   return { io, out, err, clip };
 }
@@ -136,7 +138,7 @@ describe("fond (bg) limité aux contenus de fichier", () => {
 
   it("rapport : fond sur le contenu, pas sur l'en-tête, le résumé, les notes ni les marqueurs", async () => {
     const report = [
-      "fls 1.1.0 | run r1 | /x | 2026",
+      "fls 1.2.0 | run r1 | /x | 2026",
       "",
       "[1] OK    NOTE une note",
       "",
@@ -152,8 +154,8 @@ describe("fond (bg) limité aux contenus de fichier", () => {
       "Modifiés : aucun",
     ].join("\n");
     const out = await colorizeReportText(report, targets);
-    for (const n of ["fls 1.1.0", "une note", "READ", "=== f.ts", "=== fin", "Résumé", "Modifiés", "GREP"]) expect(lineOf(out, n), n).not.toBeUndefined();
-    for (const n of ["fls 1.1.0", "une note", "READ", "=== f.ts", "=== fin", "Résumé", "Modifiés", "GREP"]) expect(lineOf(out, n)).not.toContain(BG);
+    for (const n of ["fls 1.2.0", "une note", "READ", "=== f.ts", "=== fin", "Résumé", "Modifiés", "GREP"]) expect(lineOf(out, n), n).not.toBeUndefined();
+    for (const n of ["fls 1.2.0", "une note", "READ", "=== f.ts", "=== fin", "Résumé", "Modifiés", "GREP"]) expect(lineOf(out, n)).not.toContain(BG);
     expect(lineOf(out, "const")).toContain(BG);
     expect(out.split("\n").find((l) => l.includes("const") && !l.includes("<H>"))).toContain(BG);
   });
@@ -210,7 +212,7 @@ describe("tabulations : le fond doit couvrir l'indentation", () => {
   it("fls --tree --colored : indentation par tabulations peinte", async () => {
     const out = await runColored(["--tree", "a.ts"], { "a.ts": ts });
     assertPainted(out, 5);
-    expect(out).toContain("<H>        if (x) {</H>");
+    expect(out).toContain("<H>    if (x) {</H>"); // gouttière « 2 │ » (4 colonnes) : la tabulation va jusqu'à la colonne 8
   });
 
   it("fls <dossier> --tree --colored", async () => {
@@ -257,10 +259,18 @@ describe("fls --tree --colored : contenu aligné sur la colonne du nom de fichie
     return io.out.map(String).join("");
   };
 
-  it("sortie colorée sans ANSI == sortie brute, octet pour octet (arbre imbriqué, │ de continuation)", async () => {
+  const GUTTER = /^ *\d* │ /;
+  /** Sortie colorée ramenée à la sortie brute : codes ANSI et gouttière (numéros de ligne) retirés. */
+  const toPlain = (colored: string) =>
+    colored
+      .split("\n")
+      .map((l) => (l.includes(BG) ? strip(l.slice(0, l.indexOf(BG))) + strip(l.slice(l.indexOf(BG))).replace(GUTTER, "") : strip(l)))
+      .join("\n");
+
+  it("sortie colorée sans ANSI ni numéros == sortie brute, octet pour octet (arbre imbriqué, │ de continuation)", async () => {
     const colored = await render(["--tree", "--colored", "docs"], files, true);
     const plain = await render(["--tree", "--no-color", "docs"], files, false);
-    expect(strip(colored)).toBe(plain);
+    expect(toPlain(colored)).toBe(plain);
   });
 
   it("le fond démarre exactement à la colonne du nom de fichier", async () => {
@@ -273,9 +283,9 @@ describe("fls --tree --colored : contenu aligné sur la colonne du nom de fichie
       if (!l.includes(BG)) return;
       checked += 1;
       const before = strip(l.slice(0, l.indexOf(BG)));
-      // colonne du fond = largeur du préfixe de l'arbre ; le texte visible qui suit est celui de la sortie brute
+      // colonne du fond = largeur du préfixe de l'arbre ; ce qui suit est la gouttière puis le texte de la sortie brute
       expect(plain[i].startsWith(before), plain[i]).toBe(true);
-      expect(strip(l).slice(before.length)).toBe(plain[i].slice(before.length));
+      expect(strip(l.slice(l.indexOf(BG))).replace(GUTTER, "")).toBe(plain[i].slice(before.length));
       expect(before).toMatch(/^[ │]*$/);
       expect(before.length).toBeGreaterThan(0);
     });
@@ -291,7 +301,7 @@ describe("fls --tree --colored : contenu aligné sur la colonne du nom de fichie
 
   it("exemple de la capture : fichier unique dans un sous-dossier, contenu sous le nom", async () => {
     const out = strip(await render(["--tree", "--colored", "docs"], { "docs/adr/a.md": "# T\n\nligne\n" }, true));
-    expect(out).toBe("docs\n└── adr\n    └── a.md\n        # T\n        \n        ligne\n");
+    expect(out).toBe("docs\n└── adr\n    └── a.md\n        1 │ # T\n        2 │ \n        3 │ ligne\n");
   });
 
   it("fichier à la racine de l'arbre : contenu en colonne 0, fond dès le premier caractère", async () => {
@@ -300,9 +310,9 @@ describe("fls --tree --colored : contenu aligné sur la colonne du nom de fichie
     expect(content.startsWith(BG)).toBe(true);
   });
 
-  it("tabulations : colonne de départ = largeur du préfixe de l'arbre", async () => {
+  it("tabulations : colonne de départ = préfixe de l'arbre + gouttière", async () => {
     const out = strip(await render(["--tree", "--colored", "d"], { "d/a.ts": "\tx\n" }, true));
-    expect(out).toBe("d\n└── a.ts\n        x\n"); // préfixe de 4 colonnes, la tabulation va jusqu'à la colonne 8 : x en colonne 8
+    expect(out).toBe("d\n└── a.ts\n    1 │         x\n"); // préfixe (4) + « 1 │ » (4) = colonne 8 ; la tabulation va jusqu'à la colonne 16
   });
 });
 
@@ -366,7 +376,7 @@ describe("colorizeReportText", () => {
   it("colorise rapport, read, diff, grep, résumé", async () => {
     const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
     const report = [
-      "fls 1.1.0 | run r1 | /x | 2026",
+      "fls 1.2.0 | run r1 | /x | 2026",
       "",
       "[1] OK    READ f.ts (1 lignes)",
       "=== f.ts (1 lignes) ===",
@@ -556,7 +566,7 @@ describe("colorizeReportText branches", () => {
   const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
   it("NOTE, unknown kind, bloc omis, grep sep", async () => {
     const report = [
-      "fls 1.1.0 | run r1 | /x | 2026",
+      "fls 1.2.0 | run r1 | /x | 2026",
       "",
       "[1] OK    NOTE hello world",
       "",
@@ -583,7 +593,7 @@ describe("colorizeReportText branches", () => {
   it("highlightBlock catch fallback", async () => {
     const mod = await import("./highlight.ts");
     (mod.highlightCode as any).mockRejectedValueOnce(new Error("boom"));
-    const report = ["fls 1.1.0 | run r1 | /x | 2026", "", "[1] OK    READ f.ts (1 lignes)", "=== f.ts (1 lignes) ===", "x", "=== fin ===", "", "Résumé : 1 OK, 0 FAIL, 0 SKIP"].join("\n");
+    const report = ["fls 1.2.0 | run r1 | /x | 2026", "", "[1] OK    READ f.ts (1 lignes)", "=== f.ts (1 lignes) ===", "x", "=== fin ===", "", "Résumé : 1 OK, 0 FAIL, 0 SKIP"].join("\n");
     const out = await colorizeReportText(report, targets);
     expect(out).toContain("x");
   });
@@ -607,7 +617,7 @@ describe("coverage extras", () => {
 
   it("colorResultHead fallback et edit body context", async () => {
     const report = [
-      "fls 1.1.0 | run r1 | /x | 2026",
+      "fls 1.2.0 | run r1 | /x | 2026",
       "",
       "[1] ",
       "body",
@@ -624,7 +634,7 @@ describe("coverage extras", () => {
 
   it("grep met en évidence le match", async () => {
     const report = [
-      "fls 1.1.0 | run r1 | /x | 2026",
+      "fls 1.2.0 | run r1 | /x | 2026",
       "",
       '[1] OK    GREP "foo" dans . (1 correspondance(s) dans 1 fichier(s))',
       "a.ts:1: const foo = 1",
@@ -698,7 +708,7 @@ describe("coverage extras", () => {
     (mod.highlightCode as any).mockImplementationOnce(async (code: string) => `<H>${code.split("\n")[0]}</H>`); // shorter
     (mod.highlightCode as any).mockRejectedValueOnce(new Error("boom")); // edit catch
     const report = [
-      "fls 1.1.0 | run r1 | /x | 2026",
+      "fls 1.2.0 | run r1 | /x | 2026",
       "",
       "[1] SKIP  EDIT a.ts",
       "    ignoré : une écriture précédente a échoué",
@@ -741,7 +751,7 @@ describe("coverage extras", () => {
     expect(outLink).toContain("-> target");
     // GREP with no quoted pattern, match not found, and non-grep line
     const report = [
-      "fls 1.1.0 | run r1 | /x | 2026",
+      "fls 1.2.0 | run r1 | /x | 2026",
       "",
       '[1] OK    GREP "foo" dans . (1 correspondance(s) dans 1 fichier(s))',
       "a.ts:1: bar baz",
@@ -763,7 +773,7 @@ describe("coverage extras", () => {
       .mockImplementationOnce(async (code: string) => code.split("\n").map((l) => `<H>${l}</H>`).join("\n")) // read
       .mockImplementationOnce(async (code: string) => `<H>${code.split("\n")[0]}</H>`); // edit shorter
     const report = [
-      "fls 1.1.0 | run r1 | /x | 2026",
+      "fls 1.2.0 | run r1 | /x | 2026",
       "",
       "[1] OK    READ f.ts (1 lignes)",
       "=== f.ts (1 lignes) ===",

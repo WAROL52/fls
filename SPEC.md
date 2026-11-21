@@ -1,6 +1,6 @@
 # SPEC — fls v1
 
-Spécification du comportement de `fls.ts` (version `1.1.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
+Spécification du comportement de `fls.ts` (version `1.2.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
 
 Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lancement : `node fls.ts …` (ou un alias vers ce fichier).
 
@@ -14,7 +14,8 @@ Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lan
 | `fls <<'FLS' … FLS` | script lu sur l'entrée standard |
 | `fls --file script.fls` | script lu dans un fichier (relatif au dossier courant) |
 | `fls --clip` | script lu dans le presse-papiers **et** rapport copié dans le presse-papiers |
-| `fls <sous-commande> …` | `expand`, `undo`, `log`, `spec`, `help`, `init` |
+| `fls last` | réaffiche la dernière sortie, sans rien réexécuter (§3, §8 bis) |
+| `fls <sous-commande> …` | `expand`, `undo`, `log`, `last`, `spec`, `help`, `init` |
 | `fls --dry-run …` | exécute un script en simulation |
 
 **Résolution** (dans cet ordre) :
@@ -64,6 +65,7 @@ Option inconnue, valeur manquante ou nombre invalide : `usage_error`, code de so
 | `undo [--run <id>]` | annule le dernier run non annulé, ou le run indiqué (§9) |
 | `log` | liste les runs : `id  date  N fichier(s)  [annulé]` ; « Aucun run enregistré. » s'il n'y en a pas |
 | `log --run <id>` | affiche le script plat puis le rapport du run |
+| `last` | réaffiche la **dernière sortie** (lecture rapide, `--tree` ou script, `--dry-run` compris) **sans rien réexécuter**, recolorée et repliée à la largeur actuelle du terminal (§8 bis). Accepte `--color`, `--colored`, `--no-color`, `--output`, `--clip` ; code de sortie 0. `no_last_output` (code 1) s'il n'y a rien de mémorisé |
 | `spec` | référence complète de la syntaxe, prête à coller dans un prompt |
 | `help [directive]` | liste des directives, ou aide détaillée d'une directive (`@` facultatif) ; directive inconnue : `unknown_directive` (code 2) |
 | `init` | crée `.flsignore` (modèle) s'il manque ; ajoute `.fls/` à `.gitignore` (le crée au besoin) ; idempotent |
@@ -219,7 +221,7 @@ Fichiers uniquement en v1 (un dossier donne `is_directory`, un lien symbolique `
 ## 8. Rapport
 
 ```
-fls 1.1.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
+fls 1.2.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
 
 [1] OK    TREE src
 …
@@ -239,6 +241,14 @@ Annulable avec : fls undo
 - Pied : résumé, `Modifiés` (ou `Modifierait` en simulation ; « aucun » s'il n'y a rien), et `Annulable avec : fls undo` si le run a été journalisé.
 - **Troncature** : au-delà de `--max-output-chars`, le rapport est coupé et se termine par `[rapport tronqué : N caractères omis ; relance avec --max-output-chars]`.
 - Les erreurs de syntaxe, d'usage et de commande (`undo`, `log`…) vont sur la **sortie d'erreur** : `fls : <code> : <message>`.
+
+## 8 bis. Affichage coloré : numéros de ligne, repli et `fls last` (depuis 1.2.0)
+
+**Numéros de ligne.** En sortie colorée, tout contenu de fichier (`@read`, `--tree`) est précédé d'une gouttière `N │ ` : numéro réel de la ligne dans le fichier (une plage `@read f 10-20` affiche 10 à 20 ; `--line-numbers` donne le même rendu), aligné à droite, dim, dans le bloc à fond. En `--tree`, le fond et la gouttière commencent à la colonne du nom de fichier ; le préfixe de l'arbre (`│   `) est repris, sans fond, devant chaque ligne visuelle. Les fichiers omis (`[omis : …]`) n'ont ni gouttière ni fond. La sortie sans couleur est inchangée.
+
+**Repli.** Quand la sortie colorée va vers un **terminal** dont la largeur est connue, les lignes plus larges que le terminal sont repliées dans le bloc : chaque ligne visuelle a son fond (jusqu'au bord droit), le numéro n'apparaît que sur la première (les suivantes ont une gouttière vide `  │ `), les lignes `@grep` et les diffs `+`/`-` de `@edit` continuent avec une indentation (4 et 2 colonnes). La largeur utile est `largeur du terminal − gouttière − préfixe − 1` (au moins 20 colonnes de texte). Une colonne = un point de code (caractères larges et combinants non gérés). **Aucun repli** si la sortie n'est pas un terminal, ni quand la sortie colorée est aussi écrite dans un fichier (`--output`) ou le presse-papiers (`--clip`) : ces sorties n'ont pas de largeur. Redimensionner le terminal après coup ne reflue pas ce qui est déjà affiché : relancer la commande, ou `fls last`.
+
+**`fls last`.** Chaque lecture rapide, lecture `--tree` ou exécution de script (`--dry-run` compris) mémorise sa sortie **non colorée** dans `<cache>/last.json`, où `<cache>` est `$XDG_CACHE_HOME/fls` ou `~/.cache/fls` (la nouvelle sortie remplace la précédente). `fls last` relit cette copie et passe par le même rendu que la commande d'origine, avec la couleur et la largeur d'**aujourd'hui** : rien n'est relu sur le disque du projet ni réexécuté (un `@create` déjà joué n'est pas rejoué). `last`, `help`, `spec`, `log`, `undo`, `init`, `expand`, `--version`, l'usage et les erreurs ne mémorisent rien. L'écriture du cache est un confort : son échec ne fait jamais échouer la commande. La copie contient le texte des fichiers lus : ne pas partager le dossier de cache.
 
 ## 9. Journal, `log`, `undo`
 
@@ -279,6 +289,7 @@ Les dossiers créés par le run ne sont pas supprimés.
 | `invalid_argument` | valeur d'argument ou d'option invalide |
 | `skipped` | écriture ignorée après un échec |
 | `run_not_found` / `already_undone` / `nothing_to_undo` / `conflict` | journal et `undo` |
+| `no_last_output` | `fls last` : aucune sortie mémorisée |
 | `clipboard_unavailable` | aucun outil de presse-papiers |
 
 ## 11. Presse-papiers

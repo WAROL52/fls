@@ -108,6 +108,15 @@ On copie tout le bloc, on le colle dans le terminal (les `#…` sont ignorés, `
 
 Voir [`adr/0001-forme-hash-arobase-et-zone-clip.md`](adr/0001-forme-hash-arobase-et-zone-clip.md).
 
+## Réafficher la dernière sortie : `fls last`
+
+```bash
+fls src --tree     # affiche, puis vous redimensionnez le terminal : l'affichage est décalé
+fls last           # réaffiche la même sortie, à la largeur actuelle, sans rien réexécuter
+```
+
+Chaque lecture, lecture `--tree` ou script mémorise sa sortie (non colorée) dans `~/.cache/fls/last.json` (`$XDG_CACHE_HOME/fls` si défini). `fls last` la recolore et la replie à la largeur courante du terminal ; rien n'est relu ni réexécuté, donc un script d'écriture déjà joué n'est pas rejoué. Les options `--colored`, `--no-color`, `--output` et `--clip` fonctionnent aussi. S'il n'y a rien de mémorisé : `no_last_output`.
+
 ## Simuler, annuler, retrouver
 
 ```bash
@@ -137,6 +146,8 @@ Codes de sortie : `0` tout est `OK` ; `1` au moins un `FAIL` ou une erreur de co
 | `--no-color` / `--color never` | désactive |
 
 Le fond gris n'est appliqué qu'aux contenus de fichier (lignes lues, résultats de `@grep`, lignes `+` / `-` d'un diff). Les tabulations sont développées en espaces (taquets de 8) en mode coloré pour que le fond couvre l'indentation. `expand` reste toujours brut.
+
+En sortie colorée, chaque ligne de fichier est précédée de son **numéro** (`12 │ code`). Sur un terminal, les lignes trop longues sont **repliées dans le bloc** (le numéro n'apparaît que sur la première ligne visuelle, les suivantes ont une gouttière vide) : plus de confusion entre une ligne repliée et une nouvelle ligne. Redimensionner le terminal ne reflue pas l'affichage déjà produit : relancez la commande ou tapez `fls last`. Pas de repli quand la sortie n'est pas un terminal, ni quand elle est aussi écrite dans un fichier ou le presse-papiers.
 
 ## Options utiles
 

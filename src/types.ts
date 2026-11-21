@@ -26,8 +26,15 @@ export interface Result {
   code: string;
 }
 
+/** Copie non colorée de la sortie, de quoi la réafficher (`fls last`) sans réexécuter. */
+export type Snapshot =
+  | { kind: "report"; text: string }
+  | { kind: "tree"; roots: Array<{ p: string; label: string; raw: string } | null> };
+
 export interface Report {
   text: string;
+  /** Mémorisée par `emit` pour `fls last` (absente : sortie non mémorisable). */
+  snapshot?: Snapshot;
   /** Sortie brute (mode tree) : écrite telle quelle si elle n'est pas tronquée. */
   raw?: Buffer;
   /** Texte déjà coloré (ANSI) : emit ne recolorise pas. */
@@ -66,6 +73,10 @@ export interface Io {
   clipboard: Clipboard;
   now(): Date;
   newId(now: Date): string;
+  /** Dossier où `fls last` mémorise la dernière sortie (absent : pas de mémorisation). */
+  cacheDir?: string;
+  /** Largeur du terminal (stdout) quand c'est un terminal : sert à replier les lignes longues. */
+  columns?: number;
 }
 
 export interface Args {

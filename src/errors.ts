@@ -34,5 +34,6 @@ export const ERROR_CODES: Array<[string, string]> = [
   ["already_undone", "ce run a déjà été annulé"],
   ["nothing_to_undo", "aucun run à annuler"],
   ["conflict", "des fichiers ont changé depuis le run (undo refusé sans --force)"],
+  ["no_last_output", "`fls last` : aucune sortie mémorisée à réafficher"],
   ["clipboard_unavailable", "aucun outil de presse-papiers trouvé"],
 ];

@@ -432,7 +432,7 @@ describe("@tree", () => {
     expect(r.text).toContain("    └── lib/");
     expect(r.text).not.toContain("node_modules");
     expect(r.text).not.toContain(".git");
-    expect(r.text).toContain("fls 1.1.0 | run r1 |");
+    expect(r.text).toContain("fls 1.2.0 | run r1 |");
   });
 
   it("dossier non terminal : le tronc continue", async () => {
@@ -784,7 +784,7 @@ describe("sources et sorties", () => {
   it("troncature du rapport et validation des nombres", async () => {
     const files: Files = { "a.txt": "x".repeat(500) };
     const r = await run(["a.txt", "--max-output-chars", "100"], files);
-    expect(r.text.startsWith("fls 1.1.0")).toBe(true);
+    expect(r.text.startsWith("fls 1.2.0")).toBe(true);
     expect(r.text).toMatch(/\[rapport tronqué : \d+ caractères omis/);
     for (const bad of ["0", "abc"]) {
       const e = await run(["a.txt", "--max-output-chars", bad], files);
@@ -880,7 +880,7 @@ describe("aide", () => {
   it("--help, -h, --version", async () => {
     expect((await run(["--help"])).text).toContain("fls <chemin...>");
     expect((await run(["-h"])).text).toContain("Sous-commandes".length ? "Usage :" : "");
-    expect((await run(["--version"])).text).toBe("fls 1.1.0\n");
+    expect((await run(["--version"])).text).toBe("fls 1.2.0\n");
   });
 
   it("spec contient toutes les directives et tous les codes d'erreur", async () => {
