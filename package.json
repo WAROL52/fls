@@ -1,0 +1,20 @@
+{
+  "name": "fls",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "fls — lire et modifier des fichiers en une seule commande, sans interaction. Voir SPEC.md.",
+  "main": "src/fls.ts",
+  "scripts": {
+    "build": "bun build --compile src/fls.ts --outfile=dist/fls",
+    "test": "vitest run",
+    "test:unit": "vitest run -t '^(?!.*(le binaire fonctionne|realRunner)).*'",
+    "test:e2e": "vitest run -t 'le binaire fonctionne|realRunner'",
+    "version": "node src/fls.ts --version"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.1"
+  }
+}
