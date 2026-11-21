@@ -20,6 +20,7 @@ function sb(files: Files = {}): string {
   for (const [rel, data] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
     fs.writeFileSync(path.join(dir, rel), data);
+    fs.chmodSync(path.join(dir, rel), 0o644);
   }
   return dir;
 }
@@ -954,6 +955,12 @@ describe("E/S réelles et point d'entrée", () => {
     expect(start).not.toHaveBeenCalled();
     fls.bootstrap(true, start);
     expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("isEntry : chemin absent (catch) avec href identique ou différent", () => {
+    const absent = path.join(os.tmpdir(), `fls-absent-${process.pid}`);
+    expect(fls.isEntry(absent, pathToFileURL(absent).href)).toBe(true);
+    expect(fls.isEntry(absent, pathToFileURL(path.join(os.tmpdir(), "fls-autre")).href)).toBe(false);
   });
 
   it("le binaire fonctionne vraiment (processus réel)", async () => {

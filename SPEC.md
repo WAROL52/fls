@@ -275,7 +275,7 @@ Lancer les tests (dans le dossier contenant `fls.ts` et `fls.test.ts`) :
 
 ```
 pnpm add -D vitest @vitest/coverage-v8
-pnpm exec vitest run --coverage --coverage.include=fls.ts --coverage.thresholds.100
+pnpm run test:coverage
 ```
 
 La suite (86 tests) utilise de vrais dossiers temporaires, des liens symboliques réels, de vrais sous-processus pour le presse-papiers et le binaire, et exige 100 % de couverture sur statements, branches, fonctions et lignes.
