@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fls from "./fls.ts";
 
-const BG = "\x1b[48;2;36;36;36m";
+const BG = "\x1b[48;2;20;20;20m";
 const strip = (t: string): string => t.replace(/\x1b\[[0-9;]*[mK]/g, "");
 const width = (t: string): number => [...strip(t)].length;
 

@@ -145,7 +145,9 @@ Codes de sortie : `0` tout est `OK` ; `1` au moins un `FAIL` ou une erreur de co
 | `--colored` / `--color always` | force la couleur, même vers un fichier ou le presse-papiers |
 | `--no-color` / `--color never` | désactive |
 
-Le fond gris n'est appliqué qu'aux contenus de fichier (lignes lues, résultats de `@grep`, lignes `+` / `-` d'un diff). Les tabulations sont développées en espaces (taquets de 8) en mode coloré pour que le fond couvre l'indentation. `expand` reste toujours brut.
+Les couleurs sont celles du thème **opencode** (sombre) : code sur un fond `#141414`, mots-clés mauves, fonctions pêche, chaînes vertes, nombres orange, types jaunes, opérateurs cyan, numéros de ligne gris. Le fond n'est appliqué qu'aux contenus de fichier (lignes lues, résultats de `@grep`, lignes `+` / `-` d'un diff). Les tabulations sont développées en espaces (taquets de 8) en mode coloré pour que le fond couvre l'indentation. `expand` reste toujours brut.
+
+Pour accorder le fond au thème de votre terminal, définissez `FLS_BG` avec une couleur `#rrggbb` (par exemple dans `~/.bashrc` : `export FLS_BG='#1e2127'`). Une valeur invalide est refusée (`usage_error`).
 
 En sortie colorée, chaque ligne de fichier est précédée de son **numéro** (`12 │ code`). Sur un terminal, les lignes trop longues sont **repliées dans le bloc** (le numéro n'apparaît que sur la première ligne visuelle, les suivantes ont une gouttière vide) : plus de confusion entre une ligne repliée et une nouvelle ligne. Redimensionner le terminal ne reflue pas l'affichage déjà produit : relancez la commande ou tapez `fls last`. Pas de repli quand la sortie n'est pas un terminal, ni quand elle est aussi écrite dans un fichier ou le presse-papiers.
 

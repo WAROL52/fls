@@ -77,6 +77,7 @@ export function langFromPath(filePath: string): string {
   return EXTS[ext] ?? "text";
 }
 
-export async function highlightCode(code: string, lang: string, theme: string, colorLevel: ColorLevel): Promise<string> {
+/** `theme` : nom d'un thème Shiki, ou un objet thème (ex. `OPENCODE_THEME`). */
+export async function highlightCode(code: string, lang: string, theme: unknown, colorLevel: ColorLevel): Promise<string> {
   return codeToANSI(code, lang as never, theme as never, { colorLevel });
 }

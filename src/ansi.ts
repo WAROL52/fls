@@ -25,6 +25,7 @@ export interface Palette {
 	green: (s: string) => string;
 	yellow: (s: string) => string;
 	match: (s: string) => string;
+	lineNo: (s: string) => string;
 	bgCode: Bg;
 	bgAdd: Bg;
 	bgDel: Bg;
@@ -44,11 +45,11 @@ function makeBg(open: string): Bg {
 	return { open, wrap: wrapBg };
 }
 
-function makePalette(level: ColorLevel): Palette {
+function makePalette(level: ColorLevel, codeBg: Rgb): Palette {
 	const none = makeBg("");
 	if (level === 0) {
 		const id = (s: string): string => s;
-		return { level, ok: id, fail: id, skip: id, note: id, dim: id, bold: id, cyan: id, red: id, green: id, yellow: id, match: id, bgCode: none, bgAdd: none, bgDel: none };
+		return { level, ok: id, fail: id, skip: id, note: id, dim: id, bold: id, cyan: id, red: id, green: id, yellow: id, match: id, lineNo: id, bgCode: none, bgAdd: none, bgDel: none };
 	}
 	const fg = (n: number, n256: number, rgb: [number, number, number]): string =>
 		level === 1 ? sgr(n) : level === 2 ? sgr(38, 5, n256) : sgr(38, 2, ...rgb);
@@ -56,25 +57,30 @@ function makePalette(level: ColorLevel): Palette {
 		level === 1 ? sgr(n) : level === 2 ? sgr(48, 5, n256) : sgr(48, 2, ...rgb);
 	return {
 		level,
-		ok: (s) => wrap(fg(32, 78, [80, 200, 120]), s),
-		fail: (s) => wrap(fg(31, 203, [255, 100, 100]), s),
-		skip: (s) => wrap(fg(33, 221, [240, 200, 80]), s),
-		note: (s) => wrap(fg(36, 117, [120, 220, 255]), s),
+		// couleurs du thème opencode (sombre)
+		ok: (s) => wrap(fg(32, 78, [127, 216, 143]), s),
+		fail: (s) => wrap(fg(31, 203, [224, 108, 117]), s),
+		skip: (s) => wrap(fg(33, 214, [245, 167, 66]), s),
+		note: (s) => wrap(fg(36, 74, [86, 182, 194]), s),
 		dim: (s) => wrap(sgr(2), s),
 		bold: (s) => wrap(sgr(1), s),
-		cyan: (s) => wrap(fg(36, 81, [120, 220, 255]), s),
-		red: (s) => wrap(fg(31, 203, [255, 100, 100]), s),
-		green: (s) => wrap(fg(32, 78, [80, 200, 120]), s),
-		yellow: (s) => wrap(fg(33, 221, [240, 200, 80]), s),
+		cyan: (s) => wrap(fg(36, 74, [86, 182, 194]), s),
+		red: (s) => wrap(fg(31, 203, [224, 108, 117]), s),
+		green: (s) => wrap(fg(32, 78, [127, 216, 143]), s),
+		yellow: (s) => wrap(fg(33, 180, [229, 192, 123]), s),
 		match: (s) => wrap(sgr(1, 7), s),
-		bgCode: makeBg(bg(49, 236, [36, 36, 36])),
-		bgAdd: makeBg(bg(42, 22, [30, 60, 30])),
-		bgDel: makeBg(bg(41, 52, [60, 30, 30])),
+		lineNo: (s) => wrap(fg(90, 245, [143, 143, 143]), s),
+		bgCode: makeBg(bg(40, 233, codeBg)),
+		bgAdd: makeBg(bg(42, 23, [32, 48, 59])),
+		bgDel: makeBg(bg(41, 52, [55, 34, 44])),
 	};
 }
 
-export function palette(level: ColorLevel): Palette {
-	return makePalette(level);
+export type Rgb = [number, number, number];
+
+/** Fond des contenus de fichier : #141414 (panneau du thème opencode) par défaut ; `codeBg` l'adapte au thème du terminal (niveau 3 seulement). */
+export function palette(level: ColorLevel, codeBg: Rgb = [20, 20, 20]): Palette {
+	return makePalette(level, codeBg);
 }
 
 // Applique un fond à chaque ligne, en préservant les resets ANSI internes.

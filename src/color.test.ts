@@ -70,9 +70,9 @@ describe("ansi", () => {
     for (const k of ["ok","fail","skip","note","dim","bold","cyan","red","green","yellow","match"] as const) {
       expect(p[k]("x")).toContain("\x1b[");
     }
-    expect(p.bgCode.wrap("x")).toContain("\x1b[48;2;36;36;36m");
-    expect(p.bgAdd.wrap("x")).toContain("48;2;30;60;30");
-    expect(p.bgDel.wrap("x")).toContain("48;2;60;30;30");
+    expect(p.bgCode.wrap("x")).toContain("\x1b[48;2;20;20;20m");
+    expect(p.bgAdd.wrap("x")).toContain("48;2;32;48;59");
+    expect(p.bgDel.wrap("x")).toContain("48;2;55;34;44");
   });
 
   it("niveaux 16 et 256", () => {
@@ -128,7 +128,7 @@ describe("color mode", () => {
 });
 
 describe("fond (bg) limité aux contenus de fichier", () => {
-  const BG = "\x1b[48;2;36;36;36m";
+  const BG = "\x1b[48;2;20;20;20m";
   const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
   const lineOf = (out: string, needle: string): string => out.split("\n").find((l) => l.includes(needle)) as string;
 
@@ -176,7 +176,7 @@ describe("fond (bg) limité aux contenus de fichier", () => {
 });
 
 describe("tabulations : le fond doit couvrir l'indentation", () => {
-  const BG = "\x1b[48;2;36;36;36m";
+  const BG = "\x1b[48;2;20;20;20m";
   const EOL = "\x1b[K\x1b[0m";
   const ts = "function f() {\n\tif (x) {\n\t\treturn 1;\n\t}\n}\n";
 
@@ -236,7 +236,7 @@ describe("tabulations : le fond doit couvrir l'indentation", () => {
     const diff = out.split("\n").filter((l) => l.includes("return"));
     expect(diff.length).toBeGreaterThanOrEqual(2);
     for (const l of diff.filter((x) => x.includes("<H>"))) {
-      expect(l.startsWith("\x1b[42m") || l.startsWith("\x1b[48;2;30;60;30m") || l.startsWith("\x1b[48;2;60;30;30m")).toBe(true);
+      expect(l.startsWith("\x1b[42m") || l.startsWith("\x1b[48;2;32;48;59m") || l.startsWith("\x1b[48;2;55;34;44m")).toBe(true);
       expect(l.endsWith(EOL)).toBe(true);
     }
   });
@@ -244,7 +244,7 @@ describe("tabulations : le fond doit couvrir l'indentation", () => {
 
 describe("fls --tree --colored : contenu aligné sur la colonne du nom de fichier", () => {
   const strip = (t: string) => t.replace(/\x1b\[[0-9;]*[mK]/g, "").replace(/<\/?H>/g, "");
-  const BG = "\x1b[48;2;36;36;36m";
+  const BG = "\x1b[48;2;20;20;20m";
   const EOL = "\x1b[K\x1b[0m";
   const files = {
     "docs/adr/0001.md": "# titre\n\ntexte\n",
@@ -399,8 +399,8 @@ describe("colorizeReportText", () => {
     const out = await colorizeReportText(report, targets);
     expect(out).toContain("\x1b[");
     expect(out).toContain("<H>const x = 1</H>");
-    expect(out).toContain("48;2;60;30;30m"); // del bg
-    expect(out).toContain("48;2;30;60;30m"); // add bg
+    expect(out).toContain("48;2;55;34;44m"); // del bg
+    expect(out).toContain("48;2;32;48;59m"); // add bg
   });
 
   it("niveau 0 ne modifie pas", async () => {
@@ -492,8 +492,8 @@ describe("colorize intégration", () => {
     f.io.readStdin = () => '@edit a.ts\n<<<<<<< SEARCH\nconst a = 1\n=======\nconst a = 2\n>>>>>>> REPLACE\n';
     await fls.main(["--colored"], f.io);
     const text = f.out.map(String).join("");
-    expect(text).toContain("48;2;60;30;30m");
-    expect(text).toContain("48;2;30;60;30m");
+    expect(text).toContain("48;2;55;34;44m");
+    expect(text).toContain("48;2;32;48;59m");
   });
 
   it("quick tree coloré", async () => {

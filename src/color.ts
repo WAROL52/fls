@@ -1,6 +1,7 @@
-import { applyLineBg, palette, safeTruncate, wrapAnsi, type ColorLevel, type Palette } from "./ansi.ts";
+import { applyLineBg, palette, safeTruncate, wrapAnsi, type ColorLevel, type Palette, type Rgb } from "./ansi.ts";
 import { FlsError } from "./errors.ts";
 import { highlightCode, langFromPath } from "./highlight.ts";
+import { OPENCODE_THEME } from "./theme.ts";
 import type { Args, Io } from "./types.ts";
 
 export type ColorMode = "auto" | "always" | "never";
@@ -13,9 +14,11 @@ export interface ColorTargets {
   level: ColorLevel;
   /** Largeur du terminal à respecter (lignes longues repliées dans le bloc) ; absente : aucun repli. */
   columns?: number;
+  /** Fond des contenus de fichier (`FLS_BG`) ; absent : #141414. */
+  bg?: Rgb;
 }
 
-const THEME = "github-dark";
+const THEME = OPENCODE_THEME;
 
 export function colorMode(args: Args): ColorMode {
   if (args.flags.has("no-color")) return "never";
@@ -24,6 +27,14 @@ export function colorMode(args: Args): ColorMode {
   if (v === undefined) return "auto";
   if (v === "auto" || v === "always" || v === "never") return v;
   throw new FlsError("usage_error", `--color attend auto|always|never (reçu : ${v})`);
+}
+
+/** `FLS_BG=#rrggbb` (ou `rrggbb`) : couleur de fond des contenus, pour l'accorder au thème du terminal. */
+export function parseBg(value: string | undefined): Rgb | undefined {
+  if (value === undefined || value === "") return undefined;
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value);
+  if (m === null) throw new FlsError("usage_error", `FLS_BG attend une couleur #rrggbb (reçu : ${value})`);
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
 }
 
 export function resolveTargets(args: Args, io: Io): ColorTargets {
@@ -46,11 +57,12 @@ export function resolveTargets(args: Args, io: Io): ColorTargets {
     clip,
     level,
     columns: stdout && !otherSink ? io.columns : undefined,
+    bg: parseBg(io.env?.FLS_BG),
   };
 }
 
 function pal(t: ColorTargets): Palette {
-  return palette(t.level);
+  return palette(t.level, t.bg);
 }
 
 // ───────────────────────────── Rendu chrome ─────────────────────────────
@@ -146,7 +158,7 @@ async function codeBlockRows(codes: string[], nums: number[], lang: string, pref
   return hl.flatMap((line, i) =>
     wrapAnsi(line, avail).map((part, k) => {
       const num = k === 0 ? String(nums[i]).padStart(gw) : " ".repeat(gw);
-      return p.dim(prefix) + p.bgCode.wrap(p.dim(num + GUTTER_SEP) + part);
+      return p.dim(prefix) + p.bgCode.wrap(p.lineNo(num + GUTTER_SEP) + part);
     }),
   );
 }

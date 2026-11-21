@@ -5,10 +5,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { RESET, wrapAnsi } from "./ansi.ts";
-import { colorizeReportText } from "./color.ts";
+import { colorizeReportText, parseBg } from "./color.ts";
+import { palette } from "./ansi.ts";
 import * as fls from "./fls.ts";
 
-const BG = "\x1b[48;2;36;36;36m";
+const BG = "\x1b[48;2;20;20;20m";
 const EOL = "\x1b[K\x1b[0m";
 const strip = (t: string): string => t.replace(/\x1b\[[0-9;]*[mK]/g, "");
 const width = (t: string): number => [...strip(t)].length;
@@ -31,6 +32,7 @@ interface Opts {
   columns?: number;
   tty?: boolean;
   stdin?: string;
+  env?: Record<string, string>;
 }
 async function run(files: Record<string, string | Buffer>, argv: string[], o: Opts = {}) {
   const dir = sb(files);
@@ -41,7 +43,7 @@ async function run(files: Record<string, string | Buffer>, argv: string[], o: Op
     stdinIsTTY: o.stdin === undefined,
     stdoutIsTTY: o.tty ?? true,
     stderrIsTTY: false,
-    env: {},
+    env: o.env ?? {},
     readStdin: () => o.stdin ?? "",
     out: (t) => { out.push(String(t)); },
     err: () => {},
@@ -195,7 +197,7 @@ describe("repli à la largeur du terminal", () => {
   it("@edit : lignes + et - repliées, continuation indentée de deux colonnes", async () => {
     const script = `@edit a.ts\n<<<<<<< SEARCH\n${long}\n=======\n${long.replace("message", "texte")}\n>>>>>>> REPLACE\n`;
     const r = await run(files, ["--colored", "--dry-run"], { columns: 40, stdin: script });
-    const rows = r.text.split("\n").filter((l) => /\x1b\[48;2;(60;30;30|30;60;30)m/.test(l));
+    const rows = r.text.split("\n").filter((l) => /\x1b\[48;2;(55;34;44|32;48;59)m/.test(l));
     expect(rows.length).toBeGreaterThan(4);
     for (const l of rows) expect(width(l)).toBeLessThanOrEqual(39);
     const plain = rows.map(strip);
@@ -222,5 +224,53 @@ describe("repli à la largeur du terminal", () => {
     const r = await run({ "a.ts": `${"x".repeat(60)}\n` }, ["--tree", "--colored", "a.ts"], { columns: 5 });
     const rows = rowsOf(r.text).map(strip);
     expect(rows.map((l) => l.slice(4))).toEqual(["x".repeat(20), "x".repeat(20), "x".repeat(20)]);
+  });
+});
+
+describe("couleur de fond (#141414 du thème opencode par défaut, FLS_BG pour s'accorder au terminal)", () => {
+  it("fond par défaut : #141414 (panneau du thème opencode)", async () => {
+    const r = await run({ "a.ts": "x\n" }, ["--tree", "--colored", "a.ts"]);
+    expect(r.text).toContain("\x1b[48;2;20;20;20m");
+    expect(r.text).not.toContain("48;2;0;0;0");
+  });
+
+  it("FLS_BG : fond choisi, avec ou sans #", async () => {
+    const withHash = await run({ "a.ts": "x\n" }, ["--tree", "--colored", "a.ts"], { env: { FLS_BG: "#1e2127" } });
+    expect(rowsOf(withHash.text.replace(/\x1b\[48;2;20;20;20m/g, "")).length).toBe(0);
+    expect(withHash.text).toContain("\x1b[48;2;30;33;39m");
+    expect(withHash.text).not.toContain("\x1b[48;2;20;20;20m");
+    const bare = await run({ "a.ts": "x\n" }, ["--tree", "--colored", "a.ts"], { env: { FLS_BG: "FFFFFF" } });
+    expect(bare.text).toContain("\x1b[48;2;255;255;255m");
+  });
+
+  it("FLS_BG s'applique aussi à @read et reste sans effet sur les fonds de diff", async () => {
+    const r = await run({ "a.ts": "x\n" }, ["--colored", "--dry-run"], {
+      env: { FLS_BG: "#101820" },
+      stdin: "@read a.ts\n@edit a.ts\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n",
+    });
+    expect(r.text).toContain("\x1b[48;2;16;24;32m");
+    expect(r.text).toContain("\x1b[48;2;55;34;44m");
+    expect(r.text).toContain("\x1b[48;2;32;48;59m");
+  });
+
+  it("FLS_BG vide : ignoré ; FLS_BG invalide : usage_error, code 2", async () => {
+    expect((await run({ "a.ts": "x\n" }, ["--tree", "--colored", "a.ts"], { env: { FLS_BG: "" } })).text).toContain("48;2;20;20;20");
+    const bad = await run({ "a.ts": "x\n" }, ["--tree", "--colored", "a.ts"], { env: { FLS_BG: "rouge" } });
+    expect(bad.code).toBe(2);
+  });
+
+  it("parseBg", () => {
+    expect(parseBg(undefined)).toBeUndefined();
+    expect(parseBg("")).toBeUndefined();
+    expect(parseBg("#0a0b0c")).toEqual([10, 11, 12]);
+    expect(parseBg("0A0B0C")).toEqual([10, 11, 12]);
+    expect(() => parseBg("#12345")).toThrow(/FLS_BG attend une couleur #rrggbb/);
+    expect(() => parseBg("#gggggg")).toThrow(/usage_error|FLS_BG/);
+  });
+
+  it("palette : niveaux 16 et 256 gardent le fond sombre par défaut (la couleur choisie ne vaut qu'en 24 bits)", () => {
+    expect(palette(1).bgCode.open).toBe("\x1b[40m");
+    expect(palette(2).bgCode.open).toBe("\x1b[48;5;233m");
+    expect(palette(3, [1, 2, 3]).bgCode.open).toBe("\x1b[48;2;1;2;3m");
   });
 });
