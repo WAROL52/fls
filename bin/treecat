@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: treecat [options] [path ...]
+
+Display a tree-style listing and print the contents of each file.
+Accepts files, directories, or a mix of both. Multiple paths can be given.
+
+Options:
+  -i, --input <file>   Read paths from file (one per line, spaces preserved)
+  -o, --output <file>  Write output to file (created if missing)
+  -h, --help           Show this help
+EOF
+  exit "${1:-0}"
+}
+
+input_files=()
+output_file=""
+output_set=0
+paths=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage 0
+      ;;
+    -i|--input)
+      [[ $# -ge 2 ]] || { echo "treecat: option requires an argument: $1" >&2; exit 1; }
+      input_files+=("$2")
+      shift 2
+      ;;
+    --input=*)
+      input_files+=("${1#*=}")
+      shift
+      ;;
+    -o|--output)
+      [[ $# -ge 2 ]] || { echo "treecat: option requires an argument: $1" >&2; exit 1; }
+      if [[ $output_set -eq 1 ]]; then
+        echo "treecat: only one output file is allowed" >&2
+        exit 1
+      fi
+      output_file="$2"
+      output_set=1
+      shift 2
+      ;;
+    --output=*)
+      if [[ $output_set -eq 1 ]]; then
+        echo "treecat: only one output file is allowed" >&2
+        exit 1
+      fi
+      output_file="${1#*=}"
+      output_set=1
+      shift
+      ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        paths+=("$1")
+        shift
+      done
+      ;;
+    -*)
+      echo "treecat: unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      paths+=("$1")
+      shift
+      ;;
+  esac
+done
+
+for input_file in "${input_files[@]}"; do
+  if [[ ! -e "$input_file" ]]; then
+    echo "treecat: input file does not exist: $input_file" >&2
+    exit 1
+  fi
+  if [[ -d "$input_file" ]]; then
+    echo "treecat: input path is a directory: $input_file" >&2
+    exit 1
+  fi
+  if [[ ! -r "$input_file" ]]; then
+    echo "treecat: cannot read input file: $input_file" >&2
+    exit 1
+  fi
+  if [[ ! -s "$input_file" ]]; then
+    continue
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=${line%$'\r'}
+    [[ -z "$line" ]] && continue
+    paths+=("$line")
+  done < "$input_file"
+done
+
+if [[ ${#paths[@]} -eq 0 && ${#input_files[@]} -eq 0 ]]; then
+  paths=(".")
+fi
+
+if [[ $output_set -eq 1 ]]; then
+  exec >"$output_file"
+fi
+
+print_file_contents() {
+  local path="$1"
+  local prefix="${2:-}"
+  if [[ $output_set -eq 1 && "$path" -ef "$output_file" ]]; then
+    echo "${prefix}[output file]"
+    return
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    echo "${prefix}${line}"
+  done < "$path"
+}
+
+walk() {
+  local dir="$1"
+  local prefix="$2"
+  local entries=()
+  local name
+
+  while IFS= read -r name; do
+    entries+=("$name")
+  done < <(LC_ALL=C ls -1A -- "$dir" 2>/dev/null | LC_ALL=C sort)
+
+  local count=${#entries[@]}
+  local i=0
+  for name in "${entries[@]}"; do
+    i=$((i + 1))
+    local path="$dir/$name"
+    local connector="├── "
+    local next_prefix="${prefix}│   "
+    if [[ $i -eq $count ]]; then
+      connector="└── "
+      next_prefix="${prefix}    "
+    fi
+
+    echo "${prefix}${connector}${name}"
+
+    if [[ -d "$path" && ! -L "$path" ]]; then
+      walk "$path" "$next_prefix"
+    elif [[ -f "$path" && -r "$path" ]]; then
+      print_file_contents "$path" "$next_prefix"
+    elif [[ -L "$path" ]]; then
+      echo "${next_prefix}-> $(readlink -- "$path" 2>/dev/null || echo '?')"
+    elif [[ ! -r "$path" && -e "$path" ]]; then
+      echo "${next_prefix}[unreadable]"
+    fi
+  done
+}
+
+status=0
+first=1
+for root in "${paths[@]}"; do
+  if [[ $first -eq 0 ]]; then
+    echo
+  fi
+  first=0
+
+  if [[ -d "$root" && ! -L "$root" ]]; then
+    echo "$root"
+    walk "$root" ""
+  elif [[ -f "$root" && -r "$root" ]]; then
+    echo "$root"
+    print_file_contents "$root" ""
+  elif [[ -L "$root" ]]; then
+    echo "$root"
+    echo "-> $(readlink -- "$root" 2>/dev/null || echo '?')"
+  elif [[ -e "$root" && ! -r "$root" ]]; then
+    echo "$root"
+    echo "[unreadable]"
+  else
+    echo "treecat: no such file or directory: $root" >&2
+    status=1
+  fi
+done
+
+exit "$status"
