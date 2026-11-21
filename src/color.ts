@@ -88,10 +88,9 @@ async function highlightBlock(lines: string[], lang: string, p: Palette): Promis
     const out = await highlightCode(src, lang, THEME, p.level);
     const hl = out.split("\n");
     // shiki peut ajouter/supprimer une ligne finale vide; on aligne au mieux
-    const res = lines.map((l, i) => (hl[i] !== undefined ? hl[i] : l));
-    return res.map((l) => p.bgCode.wrap(l));
+    return lines.map((l, i) => (hl[i] !== undefined ? hl[i] : l));
   } catch {
-    return lines.map((l) => p.bgCode.wrap(l));
+    return lines;
   }
 }
 
@@ -125,10 +124,10 @@ async function colorReadBody(body: string, p: Palette): Promise<string> {
           else { prefixes.push(""); codes.push(l); }
         }
         const hl = await highlightBlock(codes, lang, p);
-        for (let k = 0; k < content.length; k++) out.push(p.bgCode.wrap(p.dim(prefixes[k])) + hl[k]);
+        for (let k = 0; k < content.length; k++) out.push(p.bgCode.wrap(p.dim(prefixes[k]) + hl[k]));
       } else {
         const hl = await highlightBlock(content, lang, p);
-        out.push(...hl);
+        out.push(...hl.map((l) => p.bgCode.wrap(l)));
       }
       if (i < lines.length && lines[i] === "=== fin ===") { out.push(p.bgCode.wrap(p.bold(lines[i]))); i += 1; }
       continue;
@@ -239,7 +238,7 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
     if (inFile === null) return;
     const lang = langFromPath(inFile);
     const hl = await highlightBlock(fileContent, lang, p);
-    for (const l of hl) out.push(l);
+    for (const l of hl) out.push(p.bgCode.wrap(l));
     inFile = null; fileContent = []; filePrefix = "";
   };
   while (i < lines.length) {
