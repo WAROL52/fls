@@ -4,7 +4,8 @@ export default defineConfig({
   test: {
     coverage: {
       provider: "v8",
-      include: ["src/fls.ts"],
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.test.ts"],
       thresholds: {
         statements: 100,
         branches: 100,

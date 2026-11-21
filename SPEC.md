@@ -268,14 +268,15 @@ Premier outil qui réussit, dans l'ordre : `wl-paste` / `wl-copy`, `xclip -selec
 
 - **Entrées/sorties injectées** (`Io` : dossier courant, entrée standard, sorties, presse-papiers, horloge, identifiant) ; `main(argv, io)` renvoie le code de sortie. Le vrai `Io` n'est construit qu'au chargement du module, et le démarrage passe par `bootstrap(isEntry(...), start)`, entièrement testable.
 - **Tables** plutôt que chaînes de `if` : directives (`DIRECTIVES`, utilisées par le parseur, l'aide et la spec), sous-commandes, options globales, lecteurs/écrivains de blocs, vérifications d'écriture, outils de presse-papiers.
+- **Modules** : `src/fls.ts` (parseur, exécution, rapport, journal, aide, CLI), `src/directive/<nom>.ts` (une `Spec` par directive, assemblées par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
 - **`Workspace`** : surcouche en mémoire au-dessus du disque ; le dry-run et l'exécution réelle partagent tout le code, seul `apply` (commit) diffère.
-- **Syntaxe TypeScript effaçable uniquement** (ni `enum` ni propriétés de paramètre) : `node fls.ts` suffit.
+- **Syntaxe TypeScript effaçable uniquement** (ni `enum` ni propriétés de paramètre) : `node src/fls.ts` suffit.
 
-Lancer les tests (dans le dossier contenant `fls.ts` et `fls.test.ts`) :
+Lancer les tests (à la racine du projet) :
 
 ```
 pnpm add -D vitest @vitest/coverage-v8
 pnpm run test:coverage
 ```
 
-La suite (86 tests) utilise de vrais dossiers temporaires, des liens symboliques réels, de vrais sous-processus pour le presse-papiers et le binaire, et exige 100 % de couverture sur statements, branches, fonctions et lignes.
+La suite (87 tests) utilise de vrais dossiers temporaires, des liens symboliques réels, de vrais sous-processus pour le presse-papiers et le binaire, et exige 100 % de couverture sur statements, branches, fonctions et lignes pour tous les modules de `src/`.
