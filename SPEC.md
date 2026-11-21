@@ -52,7 +52,7 @@ Toutes en forme longue, valeur séparée par un espace (`--max-size 100`, pas de
 
 Option inconnue, valeur manquante ou nombre invalide : `usage_error`, code de sortie 2.
 
-**Couleur.** `--color=auto|always|never` (défaut `auto`), `--colored` = `always`, `--no-color` = `never`. En `auto`, la couleur s'active sur TTY et `NO_COLOR` la désactive. `always` force la couleur sur stdout/stderr, `--output` et `--clip`. `expand` reste toujours brut. `--tree --colored` colore l'arborescence et les contenus (Shiki, thème `github-dark`) ; `--tree` sans couleur conserve la parité treecat octet pour octet.
+**Couleur.** `--color=auto|always|never` (défaut `auto`), `--colored` = `always`, `--no-color` = `never`. En `auto`, la couleur s'active sur TTY et `NO_COLOR` la désactive. `always` force la couleur sur stdout/stderr, `--output` et `--clip`. `expand` reste toujours brut. `--tree --colored` colore l'arborescence et les contenus (Shiki, thème `github-dark`) ; `--tree` sans couleur conserve la parité treecat octet pour octet. Le **fond** (gris, jusqu'au bord droit) n'est appliqué qu'aux contenus de fichier : lignes lues par `@read` / `--tree`, résultats de `@grep` et lignes `+` / `-` de `@edit` (fond vert / rouge). L'en-tête, les titres, les notes, le résumé, l'arbre, l'usage et l'aide n'ont pas de fond.
 
 ## 3. Sous-commandes
 

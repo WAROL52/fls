@@ -655,7 +655,10 @@ function withTruncation(text: string, limit: number, color: boolean): string {
 
 export async function emit(args: Args, io: Io, report: Report): Promise<void> {
   const targets = resolveTargets(args, io);
-  const limit = numberArg(args, "max-output-chars", report.raw === undefined ? DEFAULT_MAX_OUTPUT : Infinity);
+  // Lecture brute `--tree` (colorée ou non) : pas de limite par défaut, sinon la coupe tombe au milieu
+  // de l'arborescence et masque les dossiers suivants (les codes ANSI comptent dans la taille).
+  const rawTree = report.raw !== undefined || report.preColored === true;
+  const limit = numberArg(args, "max-output-chars", rawTree ? Infinity : DEFAULT_MAX_OUTPUT);
   const plainBase = report.text;
   const expand = isExpand(args);
   const preColored = report.preColored === true;

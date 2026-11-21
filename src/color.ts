@@ -56,9 +56,9 @@ function statusColor(status: string, p: Palette): string {
 function colorResultHead(line: string, p: Palette): string {
   // [n] STATUS  KIND title : code
   const m = /^(\[\d+\] )(\S+)(\s+)(.*)$/.exec(line);
-  if (m === null) return p.bgCode.wrap(line);
+  if (m === null) return line;
   const [, n, status, sp, rest] = m;
-  return p.bgCode.wrap(p.dim(n) + statusColor(status, p) + sp + rest);
+  return p.dim(n) + statusColor(status, p) + sp + rest;
 }
 
 function highlightGrepMatch(text: string, pattern: string | null, p: Palette): string {
@@ -73,14 +73,29 @@ function colorGrepLine(line: string, p: Palette, pattern: string | null): string
   // fichier:ligne: match  or fichier-ligne- context  or --
   if (line === "--") return p.bgCode.wrap(p.dim(line));
   const m = /^(.+?)([:\-])(\d+)([:\-])(.*)$/.exec(line);
-  if (m === null) return p.bgCode.wrap(line);
+  if (m === null) return line;
   const [, file, a, ln, b, rest] = m;
   const isMatch = b === ":";
   const content = isMatch ? highlightGrepMatch(rest, pattern, p) : p.dim(rest);
   return p.bgCode.wrap(p.cyan(file) + p.dim(a) + p.yellow(ln) + p.dim(b) + content);
 }
 
-async function highlightBlock(lines: string[], lang: string, p: Palette): Promise<string[]> {
+const TAB_WIDTH = 8;
+
+/**
+ * Remplace chaque tabulation par des espaces jusqu'au prochain taquet (8 colonnes), la ligne
+ * commençant à la colonne `startCol`. Un terminal ne peint pas le fond sous une tabulation :
+ * sans cela, l'indentation des fichiers indentés par tabulations resterait sans fond.
+ */
+export function expandTabs(line: string, startCol = 0): string {
+  if (!line.includes("\t")) return line;
+  let out = "";
+  for (const ch of line) out += ch === "\t" ? " ".repeat(TAB_WIDTH - ((startCol + [...out].length) % TAB_WIDTH)) : ch;
+  return out;
+}
+
+async function highlightBlock(rawLines: string[], lang: string, p: Palette, startCol = 0): Promise<string[]> {
+  const lines = rawLines.map((l) => expandTabs(l, startCol));
   /* v8 ignore next */
   if (p.level === 0) return lines;
   const src = lines.join("\n");
@@ -104,7 +119,7 @@ async function colorReadBody(body: string, p: Palette): Promise<string> {
   while (i < lines.length) {
     const m = /^=== (.+?)(?: \([^)]+\))? ===$/.exec(lines[i]);
     if (m !== null && !lines[i].startsWith("=== fin ===")) {
-      out.push(p.bgCode.wrap(p.bold(lines[i])));
+      out.push(p.bold(lines[i]));
       i += 1;
       const content: string[] = [];
       while (i < lines.length && lines[i] !== "=== fin ===") {
@@ -123,16 +138,16 @@ async function colorReadBody(body: string, p: Palette): Promise<string> {
           if (pm !== null) { prefixes.push(pm[1]); codes.push(pm[2]); }
           else { prefixes.push(""); codes.push(l); }
         }
-        const hl = await highlightBlock(codes, lang, p);
+        const hl = await highlightBlock(codes, lang, p, prefixes[0].length);
         for (let k = 0; k < content.length; k++) out.push(p.bgCode.wrap(p.dim(prefixes[k]) + hl[k]));
       } else {
         const hl = await highlightBlock(content, lang, p);
         out.push(...hl.map((l) => p.bgCode.wrap(l)));
       }
-      if (i < lines.length && lines[i] === "=== fin ===") { out.push(p.bgCode.wrap(p.bold(lines[i]))); i += 1; }
+      if (i < lines.length && lines[i] === "=== fin ===") { out.push(p.bold(lines[i])); i += 1; }
       continue;
     }
-    out.push(p.bgCode.wrap(p.dim(lines[i])));
+    out.push(p.dim(lines[i]));
     i += 1;
   }
   return out.join("\n");
@@ -145,12 +160,12 @@ async function colorEditBody(body: string, p: Palette): Promise<string> {
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
-    if (lines[i].startsWith("@@")) { out.push(p.bgCode.wrap(p.cyan(lines[i]))); i += 1; continue; }
+    if (lines[i].startsWith("@@")) { out.push(p.cyan(lines[i])); i += 1; continue; }
     if (lines[i].startsWith("+ ") || lines[i].startsWith("- ")) {
       const sign = lines[i][0] as "+" | "-";
       const bg = sign === "+" ? p.bgAdd : p.bgDel;
       const chunk: string[] = [];
-      while (i < lines.length && lines[i].startsWith(`${sign} `)) { chunk.push(lines[i].slice(2)); i += 1; }
+      while (i < lines.length && lines[i].startsWith(`${sign} `)) { chunk.push(expandTabs(lines[i].slice(2), 2)); i += 1; }
       let hl: string[];
       try {
         const raw = await highlightCode(chunk.join("\n"), "text", THEME, p.level);
@@ -162,7 +177,7 @@ async function colorEditBody(body: string, p: Palette): Promise<string> {
       }
       continue;
     }
-    out.push(p.bgCode.wrap(lines[i]));
+    out.push(lines[i]);
     i += 1;
   }
   return out.join("\n");
@@ -178,11 +193,11 @@ export async function colorizeReportText(text: string, t: ColorTargets): Promise
     const block = blocks[bi];
     const lines = block.split("\n");
     if (bi === 0 && lines[0].startsWith("fls ")) {
-      out.push(lines.map((l) => p.bgCode.wrap(p.dim(l))).join("\n"));
+      out.push(lines.map((l) => p.dim(l)).join("\n"));
       continue;
     }
     if (lines[0].startsWith("Résumé :")) {
-      out.push(lines.map((l) => p.bgCode.wrap(p.dim(l))).join("\n"));
+      out.push(lines.map((l) => p.dim(l)).join("\n"));
       continue;
     }
     if (/^\[\d+\] /.test(lines[0])) {
@@ -200,12 +215,12 @@ export async function colorizeReportText(text: string, t: ColorTargets): Promise
           const pm = /^"((?:[^"\\]|\\.)*)"/.exec(titleRest);
           const pat = pm ? pm[1].replace(/\\(.)/g, "$1") : null;
           bodyColored = body.split("\n").map((l) => colorGrepLine(l, p, pat)).join("\n");
-        } else bodyColored = body.split("\n").map((l) => p.bgCode.wrap(l)).join("\n");
+        } else bodyColored = body;
       }
       out.push(bodyColored === "" ? headColored : `${headColored}\n${bodyColored}`);
       continue;
     }
-    out.push(lines.map((l) => p.bgCode.wrap(l)).join("\n"));
+    out.push(lines.map((l) => l).join("\n"));
   }
   return out.join("\n\n");
 }
@@ -228,7 +243,7 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
   let i = 0;
   // root line
   /* v8 ignore next */
-  if (i < lines.length) { out.push(p.bgCode.wrap(p.bold(lines[i]))); i += 1; }
+  if (i < lines.length) { out.push(p.bold(lines[i])); i += 1; }
   // We don't have full parse context; fallback: color structure vs content heuristically.
   // Heuristic: lines matching tree connectors are structure; others are content belonging to last file.
   let inFile: string | null = null;
@@ -253,7 +268,7 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
       const isDir = next !== undefined && (next.startsWith(childPrefix + "├── ") || next.startsWith(childPrefix + "└── "));
       const isLink = next !== undefined && next.startsWith(childPrefix + "-> ");
       const isSpecial = next !== undefined && (next === childPrefix + "[unreadable]" || next === childPrefix + "[output file]");
-      out.push(p.bgCode.wrap(p.dim(prefix + conn) + name));
+      out.push(p.dim(prefix + conn) + name);
       if (!isDir && !isLink && !isSpecial && next !== undefined && next.startsWith(childPrefix) && !next.startsWith(childPrefix + "├── ") && !next.startsWith(childPrefix + "└── ")) {
         // file content follows
         inFile = name;
@@ -272,7 +287,7 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
       if (isLink || isSpecial) {
         i += 1;
         /* v8 ignore next */
-        if (i < lines.length) { out.push(p.bgCode.wrap(p.dim(lines[i]))); i += 1; }
+        if (i < lines.length) { out.push(p.dim(lines[i])); i += 1; }
         continue;
       }
       i += 1;
@@ -281,7 +296,7 @@ export async function colorizeQuickTree(raw: string, _ws: Workspace, _rootRel: s
     // root file content or link
     if (line.startsWith("-> ") || line === "[unreadable]" || line === "[output file]") {
       await flushFile();
-      out.push(p.bgCode.wrap(p.dim(line)));
+      out.push(p.dim(line));
       i += 1;
       continue;
     }

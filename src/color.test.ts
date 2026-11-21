@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { applyLineBg, palette, safeTruncate } from "./ansi.ts";
-import { colorizeQuickTree, colorizeReportText, colorMode, resolveTargets } from "./color.ts";
+import { colorizeQuickTree, colorizeReportText, colorMode, expandTabs, resolveTargets } from "./color.ts";
 import * as highlight from "./highlight.ts";
 import * as fls from "./fls.ts";
 import { Workspace } from "./workspace.ts";
@@ -122,6 +122,176 @@ describe("color mode", () => {
     expect(t.stdout).toBe(true);
     expect(t.file).toBe(true);
     expect(t.clip).toBe(true);
+  });
+});
+
+describe("fond (bg) limité aux contenus de fichier", () => {
+  const BG = "\x1b[48;2;36;36;36m";
+  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
+  const lineOf = (out: string, needle: string): string => out.split("\n").find((l) => l.includes(needle)) as string;
+
+  it("ligne vide de fichier : le fond remplit jusqu'au bord", () => {
+    expect(palette(3).bgCode.wrap("")).toBe(`${BG}\x1b[K\x1b[0m`);
+  });
+
+  it("rapport : fond sur le contenu, pas sur l'en-tête, le résumé, les notes ni les marqueurs", async () => {
+    const report = [
+      "fls 1.1.0 | run r1 | /x | 2026",
+      "",
+      "[1] OK    NOTE une note",
+      "",
+      "[2] OK    READ f.ts (1 lignes)",
+      "=== f.ts (1 lignes) ===",
+      "const x = 1",
+      "=== fin ===",
+      "",
+      "[3] OK    GREP \"x\" dans . (1 correspondance(s) dans 1 fichier(s))",
+      "f.ts:1: const x = 1",
+      "",
+      "Résumé : 2 OK, 0 FAIL, 0 SKIP",
+      "Modifiés : aucun",
+    ].join("\n");
+    const out = await colorizeReportText(report, targets);
+    for (const n of ["fls 1.1.0", "une note", "READ", "=== f.ts", "=== fin", "Résumé", "Modifiés", "GREP"]) expect(lineOf(out, n), n).not.toBeUndefined();
+    for (const n of ["fls 1.1.0", "une note", "READ", "=== f.ts", "=== fin", "Résumé", "Modifiés", "GREP"]) expect(lineOf(out, n)).not.toContain(BG);
+    expect(lineOf(out, "const")).toContain(BG);
+    expect(out.split("\n").find((l) => l.includes("const") && !l.includes("<H>"))).toContain(BG);
+  });
+
+  it("usage / texte libre : aucun fond", async () => {
+    const out = await colorizeReportText("Usage :\n  fls <chemin...>   lecture rapide\n\nOptions :\n  --tree  brut", targets);
+    expect(out).not.toContain(BG);
+  });
+
+  it("fls --tree : fond sur le contenu seulement, pas sur la racine ni les noms", async () => {
+    const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), "fls-bg-")));
+    const raw = "d\n└── a.ts\n    const a = 1\n";
+    const out = await colorizeQuickTree(raw, ws, "d", "d", targets);
+    expect(lineOf(out, "a.ts")).not.toContain(BG);
+    expect(lineOf(out, "const")).toContain(BG);
+    expect(out.split("\n")[0]).not.toContain(BG);
+  });
+});
+
+describe("tabulations : le fond doit couvrir l'indentation", () => {
+  const BG = "\x1b[48;2;36;36;36m";
+  const EOL = "\x1b[K\x1b[0m";
+  const ts = "function f() {\n\tif (x) {\n\t\treturn 1;\n\t}\n}\n";
+
+  it("expandTabs : taquets de 8 colonnes, colonne de départ, sans tabulation inchangé", () => {
+    expect(expandTabs("\tx")).toBe("        x");
+    expect(expandTabs("\t\tx")).toBe("                x");
+    expect(expandTabs("ab\tx")).toBe("ab      x");
+    expect(expandTabs("a\tb\tc")).toBe("a       b       c");
+    expect(expandTabs("\tx", 4)).toBe("    x");
+    expect(expandTabs("é\tx")).toBe("é       x");
+    expect(expandTabs("sans tab")).toBe("sans tab");
+  });
+
+  /** Chaque ligne de contenu (marquée <H> par le mock) : fond au début, remplissage à la fin, aucune tabulation. */
+  const assertPainted = (out: string, expected: number) => {
+    const content = out.split("\n").filter((l) => l.includes("<H>"));
+    expect(content).toHaveLength(expected);
+    for (const l of content) {
+      expect(l.startsWith(BG), l).toBe(true);
+      expect(l.endsWith(EOL), l).toBe(true);
+    }
+    expect(out).not.toContain("\t");
+  };
+  const runColored = async (argv: string[], files: Record<string, string>, stdin?: string) => {
+    const dir = sb(files);
+    const f = fake(dir, { stdoutTTY: false });
+    if (stdin !== undefined) f.io.readStdin = () => stdin;
+    await fls.main(["--colored", ...argv], f.io);
+    return f.out.map(String).join("");
+  };
+
+  it("fls --tree --colored : indentation par tabulations peinte", async () => {
+    const out = await runColored(["--tree", "a.ts"], { "a.ts": ts });
+    assertPainted(out, 6);
+    expect(out).toContain("<H>        if (x) {</H>");
+  });
+
+  it("fls <dossier> --tree --colored", async () => {
+    assertPainted(await runColored(["--tree", "d"], { "d/a.ts": ts }), 6);
+  });
+
+  it("@read --colored : tabulations développées", async () => {
+    assertPainted(await runColored([], { "a.ts": ts }, "@read a.ts\n"), 5);
+  });
+
+  it("@read --line-numbers --colored : colonne de départ après le préfixe", async () => {
+    const out = await runColored([], { "a.ts": ts }, "@read a.ts --line-numbers\n");
+    assertPainted(out, 5);
+    expect(out).toContain("<H>    if (x) {</H>"); // préfixe « 2 | » (4 colonnes) : la tabulation va jusqu'à la colonne 8
+  });
+
+  it("@edit --colored : lignes +/- indentées par tabulations peintes", async () => {
+    const script = "@edit a.ts\n<<<<<<< SEARCH\n\t\treturn 1;\n=======\n\t\treturn 2;\n>>>>>>> REPLACE\n";
+    const out = await runColored(["--dry-run"], { "a.ts": ts }, script);
+    expect(out).not.toContain("\t");
+    const diff = out.split("\n").filter((l) => l.includes("return"));
+    expect(diff.length).toBeGreaterThanOrEqual(2);
+    for (const l of diff.filter((x) => x.includes("<H>"))) {
+      expect(l.startsWith("\x1b[42m") || l.startsWith("\x1b[48;2;30;60;30m") || l.startsWith("\x1b[48;2;60;30;30m")).toBe(true);
+      expect(l.endsWith(EOL)).toBe(true);
+    }
+  });
+});
+
+describe("fls --tree --colored : aucune coupe par défaut (dossiers suivants visibles)", () => {
+  // Régression : `fls src --tree --colored` coupait à 200 000 caractères (ANSI compris) au milieu du
+  // premier gros fichier, et les sous-dossiers suivants (ex. `directive/`) n'apparaissaient jamais.
+  const big = "const ligne = 1;\n".repeat(20_000); // ≈ 340 000 caractères, > 200 000 une fois coloré
+  const files = { "src/ansi.ts": big, "src/color.test.ts": big, "src/directive/read.ts": "export const read = 1;\n", "src/zz.ts": "fin\n" };
+
+  it("couleur forcée : tout l'arbre est présent, aucun message de troncature", async () => {
+    const dir = sb(files);
+    const f = fake(dir, { stdoutTTY: true });
+    const code = await fls.main(["--tree", "--colored", "src"], f.io);
+    const text = f.out.map(String).join("");
+    expect(code).toBe(0);
+    expect(text.length).toBeGreaterThan(200_000);
+    expect(text).not.toContain("tronqué");
+    expect(text).toContain("directive");
+    expect(text).toContain("read.ts");
+    expect(text).toContain("<H>export const read = 1;</H>");
+    expect(text).toContain("zz.ts");
+  });
+
+  it("sans couleur : même arbre complet (parité)", async () => {
+    const dir = sb(files);
+    const f = fake(dir, { stdoutTTY: false });
+    await fls.main(["--tree", "--no-color", "src"], f.io);
+    const text = f.out.map(String).join("");
+    expect(text).not.toContain("tronqué");
+    expect(text).toContain("directive");
+    expect(text).toContain("zz.ts");
+  });
+
+  it("--output et --clip : pas de coupe non plus", async () => {
+    const dir = sb(files);
+    const f = fake(dir, { stdoutTTY: false });
+    await fls.main(["--tree", "--colored", "src", "--output", "out.txt", "--clip"], f.io);
+    expect(fs.readFileSync(path.join(dir, "out.txt"), "utf8")).toContain("zz.ts");
+    expect(fs.readFileSync(path.join(dir, "out.txt"), "utf8")).not.toContain("tronqué");
+    expect(f.clip.text).toContain("zz.ts");
+  });
+
+  it("--max-output-chars explicite coupe toujours", async () => {
+    const dir = sb(files);
+    const f = fake(dir, { stdoutTTY: true });
+    await fls.main(["--tree", "--colored", "src", "--max-output-chars", "5000"], f.io);
+    const text = f.out.map(String).join("");
+    expect(text).toContain("tronqué");
+    expect(text).not.toContain("zz.ts");
+  });
+
+  it("le rapport fls normal (@read) garde sa limite par défaut", async () => {
+    const dir = sb(files);
+    const f = fake(dir, { stdoutTTY: true });
+    await fls.main(["src"], f.io);
+    expect(f.out.map(String).join("")).toContain("tronqué");
   });
 });
 
