@@ -274,8 +274,8 @@ Premier outil qui réussit, dans l'ordre : `wl-paste` / `wl-copy`, `xclip -selec
 Lancer les tests (dans le dossier contenant `fls.ts` et `fls.test.ts`) :
 
 ```
-npm i -D vitest @vitest/coverage-v8
-npx vitest run --coverage --coverage.include=fls.ts --coverage.thresholds.100
+pnpm add -D vitest @vitest/coverage-v8
+pnpm exec vitest run --coverage --coverage.include=fls.ts --coverage.thresholds.100
 ```
 
 La suite (86 tests) utilise de vrais dossiers temporaires, des liens symboliques réels, de vrais sous-processus pour le presse-papiers et le binaire, et exige 100 % de couverture sur statements, branches, fonctions et lignes.

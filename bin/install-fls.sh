@@ -1,31 +1,29 @@
 #!/usr/bin/env bash
-# usage: ./install-fls.sh /chemin/vers/fls.ts
+# Installe fls globalement :
+#   - binaire       ~/.local/share/fls/fls (compilé depuis src/fls.ts avec bun)
+#   - wrapper       ~/.local/bin/fls
+#   - PATH          ajouté à ~/.bashrc si absent
 set -euo pipefail
 
-SRC="$(realpath "${1:?usage: install-fls.sh /chemin/vers/fls.ts}")"
+cd "$(dirname "$0")/.." || exit 1
+
 DEST_DIR="$HOME/.local/share/fls"
 BIN_DIR="$HOME/.local/bin"
 
-command -v node >/dev/null || { echo "node manque"; exit 1; }
-[ -f "$SRC" ] || { echo "fichier absent: $SRC"; exit 1; }
-
+command -v bun >/dev/null || { echo "bun manque : https://bun.sh"; exit 1; }
 mkdir -p "$DEST_DIR" "$BIN_DIR"
 
-# un seul fichier JS, deps incluses
-npx --yes esbuild "$SRC" --bundle --platform=node --format=esm --target=node20 \
-  --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);" \
-  --outfile="$DEST_DIR/fls.mjs"
+bun build --compile src/fls.ts --outfile "$DEST_DIR/fls"
 
 cat > "$BIN_DIR/fls" <<'EOF'
 #!/usr/bin/env bash
-exec node "$HOME/.local/share/fls/fls.mjs" "$@"
+exec "$HOME/.local/share/fls/fls" "$@"
 EOF
 chmod +x "$BIN_DIR/fls"
 
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-     echo "PATH ajouté à ~/.bashrc : ouvre un nouveau terminal" ;;
-esac
+if ! grep -qF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null; then
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+  echo "PATH ajouté à ~/.bashrc : ouvre un nouveau terminal"
+fi
 
-"$BIN_DIR/fls" help >/dev/null && echo "ok : fls installé" || echo "fls help a échoué"
+"$BIN_DIR/fls" --version >/dev/null && echo "ok : fls installé" || { echo "fls --version a échoué"; exit 1; }

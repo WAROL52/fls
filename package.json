@@ -6,9 +6,11 @@
   "main": "src/fls.ts",
   "scripts": {
     "build": "bun build --compile src/fls.ts --outfile=dist/fls",
+    "install:global": "bash bin/install-fls.sh",
     "test": "vitest run",
     "test:unit": "vitest run -t '^(?!.*(le binaire fonctionne|realRunner)).*'",
     "test:e2e": "vitest run -t 'le binaire fonctionne|realRunner'",
+    "uninstall:global": "bash bin/uninstall-fls.sh",
     "version": "node src/fls.ts --version"
   },
   "engines": {
