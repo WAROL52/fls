@@ -22,6 +22,7 @@ import { DIRECTIVES, SPEC_BY_NAME } from "./directive/index.ts";
 import { ERROR_CODES, FlsError, syntaxError, USAGE_CODES } from "./errors.ts";
 import { loadIgnore } from "./paths.ts";
 import { blockLines, quote, splitLines, tokenize } from "./text.ts";
+import { renderTree, treeRel } from "./tree.ts";
 import type {
   Args,
   Clipboard,
@@ -211,7 +212,8 @@ function writeJournal(io: Io, ws: Workspace, id: string, now: Date, pending: Pen
 
 export function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean): Report {
   const ws = new Workspace(io.cwd, numberArg(args, "max-size", DEFAULT_MAX_SIZE));
-  const results = execute(ops, { ws, ignore: loadIgnore(ws, args.ignore) });
+  const out = args.values.get("output");
+  const results = execute(ops, { ws, ignore: loadIgnore(ws, args.ignore), output: out === undefined ? null : path.resolve(io.cwd, out) });
   const pending = ws.pending();
   const paths = pending.map((p) => p.rel);
   const now = io.now();
@@ -303,6 +305,7 @@ function cmdLog(args: Args, io: Io): Report {
 // ───────────────────────────── Aide : usage, spec, help, init ─────────────────────────────
 
 const GLOBAL_DOCS: string[] = [
+  "--tree                  (lecture rapide ou script) sortie brute façon treecat",
   "--dry-run               simule sans rien écrire",
   "--file <chemin>         lit le script dans un fichier",
   "--clip                  lit le script dans le presse-papiers ET copie le rapport",
@@ -323,6 +326,7 @@ export function usage(): string {
     "",
     "Usage :",
     "  fls <chemin...>              lecture rapide (arbre puis contenus)",
+    "  fls --tree [chemin...]       sortie brute façon treecat (aucun ignore)",
     "  fls <<'FLS' ... FLS          script lu sur l'entrée standard",
     "  fls --file script.fls        script lu dans un fichier",
     "  fls --clip                   script lu dans le presse-papiers, rapport copié",
@@ -361,6 +365,7 @@ const SPEC_INTRO = [
   "    <<<<<<< SEARCH / ======= / >>>>>>> REPLACE   (un ou plusieurs, pour @edit)",
   "    <<<<<<< CONTENT / >>>>>>> END                (pour @create, @overwrite, @write, @append)",
   "- chemins relatifs au dossier courant ; absolus, `..` et liens symboliques sortants sont refusés ;",
+  "- --tree (global) applique @read --tree à tous les reads ; --tree seul en lecture rapide produit la sortie brute ;",
   "- toutes les directives voient l'état simulé : un @read après un @edit montre le résultat ;",
   "- après un échec d'écriture, les écritures suivantes sont SKIP mais les lectures continuent ;",
   "- chaque @edit est atomique (tous ses blocs passent ou aucun) ; les écritures réussies sont appliquées.",
@@ -448,6 +453,7 @@ export function createClipboard(runner: Runner): Clipboard {
 // ───────────────────────────── Ligne de commande ─────────────────────────────
 
 const GLOBAL: Record<string, "flag" | "value" | "list"> = {
+  tree: "flag",
   "dry-run": "flag",
   clip: "flag",
   "clip-in": "flag",
@@ -507,13 +513,47 @@ function scriptText(args: Args, io: Io): string {
 const hasScriptSource = (args: Args, io: Io): boolean =>
   args.values.has("file") || args.flags.has("clip") || args.flags.has("clip-in") || !io.stdinIsTTY;
 
-const cmdRun = (args: Args, io: Io): Report => execAndReport(args, io, parseScript(scriptText(args, io)), args.flags.has("dry-run"));
+function cmdRun(args: Args, io: Io): Report {
+  const ops = parseScript(scriptText(args, io));
+  if (args.flags.has("tree")) for (const op of ops) if (op.name === "read") op.opts["tree"] = true;
+  return execAndReport(args, io, ops, args.flags.has("dry-run"));
+}
 const cmdExpand = (args: Args, io: Io): Report => ({ text: serialize(parseScript(scriptText(args, io))), code: 0 });
 
-function cmdQuickRead(args: Args, io: Io): Report {
+function quickPaths(args: Args, io: Io): string[] {
   const listFile = args.values.get("paths-from");
   const extra = listFile === undefined ? [] : splitLines(fs.readFileSync(path.resolve(io.cwd, listFile), "utf8")).filter((l) => l.trim() !== "");
-  return execAndReport(args, io, [...args.positional, ...extra].map((p) => makeOp("read", [p])), false);
+  return [...args.positional, ...extra];
+}
+
+function cmdQuickRead(args: Args, io: Io): Report {
+  return execAndReport(args, io, quickPaths(args, io).map((p) => makeOp("read", [p])), false);
+}
+
+function cmdQuickTree(args: Args, io: Io): Report {
+  if (args.ignore.length > 0) throw new FlsError("usage_error", "--ignore n'a pas de sens avec --tree (aucun ignore)");
+  if (args.values.has("max-size")) throw new FlsError("usage_error", "--max-size n'a pas de sens avec --tree (aucune limite de taille)");
+  const listed = args.values.has("paths-from");
+  const paths = quickPaths(args, io);
+  if (paths.length === 0 && !listed) paths.push(".");
+  const outputRaw = args.values.get("output");
+  const output = outputRaw === undefined ? null : path.resolve(io.cwd, outputRaw);
+  if (output !== null) fs.writeFileSync(output, "");
+  const ws = new Workspace(io.cwd, DEFAULT_MAX_SIZE);
+  const parts: Buffer[] = [];
+  let code = 0;
+  paths.forEach((p, i) => {
+    if (i > 0) parts.push(Buffer.from("\n"));
+    const label = p === "" ? "." : p;
+    try {
+      parts.push(renderTree(ws, label, treeRel(p), output));
+    } catch (e) {
+      code = 1;
+      io.err(`fls : ${[(e as FlsError).code, (e as Error).message].filter(Boolean).join(" : ")}\n`);
+    }
+  });
+  const raw = Buffer.concat(parts);
+  return { text: raw.toString("utf8"), raw, code };
 }
 
 const SUBCOMMANDS: Record<string, (args: Args, io: Io) => Report> = {
@@ -530,29 +570,32 @@ export function route(args: Args, io: Io): Report {
   if (args.flags.has("version")) return { text: `fls ${VERSION}\n`, code: 0 };
   const [first, ...rest] = args.positional;
   if (first !== undefined && Object.hasOwn(SUBCOMMANDS, first)) return SUBCOMMANDS[first]({ ...args, positional: rest }, io);
-  if (args.positional.length > 0 || args.values.has("paths-from")) return cmdQuickRead(args, io);
+  if (args.positional.length > 0 || args.values.has("paths-from")) {
+    return args.flags.has("tree") ? cmdQuickTree(args, io) : cmdQuickRead(args, io);
+  }
+  if (args.flags.has("tree")) return hasScriptSource(args, io) ? cmdRun(args, io) : cmdQuickTree(args, io);
   // `fls` seul, sans aucune source de script : affiche l'usage plutôt qu'une erreur.
   if (!hasScriptSource(args, io)) return { text: usage(), code: 0 };
   return cmdRun(args, io);
 }
 
-export function emit(args: Args, io: Io, text: string): void {
-  const limit = numberArg(args, "max-output-chars", DEFAULT_MAX_OUTPUT);
-  const shown =
-    text.length > limit
-      ? `${text.slice(0, limit)}\n[rapport tronqué : ${text.length - limit} caractères omis ; relance avec --max-output-chars]\n`
-      : text;
+export function emit(args: Args, io: Io, report: Report): void {
+  const limit = numberArg(args, "max-output-chars", report.raw === undefined ? DEFAULT_MAX_OUTPUT : Infinity);
+  const truncated = report.text.length > limit;
+  const shown: string | Buffer = truncated
+    ? `${report.text.slice(0, limit)}\n[rapport tronqué : ${report.text.length - limit} caractères omis ; relance avec --max-output-chars]\n`
+    : (report.raw ?? report.text);
   const output = args.values.get("output");
   if (output !== undefined) fs.writeFileSync(path.resolve(io.cwd, output), shown);
   else io.out(shown);
-  if (args.flags.has("clip") || args.flags.has("clip-out")) io.clipboard.write(shown);
+  if (args.flags.has("clip") || args.flags.has("clip-out")) io.clipboard.write(typeof shown === "string" ? shown : shown.toString("utf8"));
 }
 
 export function main(argv: string[], io: Io): number {
   try {
     const args = parseArgs(argv);
     const report = route(args, io);
-    emit(args, io, report.text);
+    emit(args, io, report);
     return report.code;
   } catch (e) {
     io.err(`fls : ${[(e as FlsError).code, (e as Error).message].filter(Boolean).join(" : ")}\n`);

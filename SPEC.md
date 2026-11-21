@@ -10,6 +10,7 @@ Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lan
 |---|---|
 | `fls` | affiche l'usage (comme `--help`) |
 | `fls <chemin...>` | lecture rapide : équivaut à un `@read` par chemin |
+| `fls --tree [chemin...]` | lecture rapide brute façon `treecat` (aucun ignore, aucun rapport fls) |
 | `fls <<'FLS' … FLS` | script lu sur l'entrée standard |
 | `fls --file script.fls` | script lu dans un fichier (relatif au dossier courant) |
 | `fls --clip` | script lu dans le presse-papiers **et** rapport copié dans le presse-papiers |
@@ -20,8 +21,9 @@ Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lan
 
 1. `--help` / `-h` affiche l'usage ; `--version` affiche la version.
 2. Si le **premier argument positionnel** est un nom de sous-commande, c'est la sous-commande (pour lire un fichier nommé `log`, écrire `./log`).
-3. Sinon, s'il y a des chemins ou `--paths-from` : **lecture rapide**.
-4. Sinon : **exécution de script**. Source du script : `--file`, puis `--clip` / `--clip-in`, puis l'entrée standard. Sans argument et sans source (entrée standard terminal), `fls` affiche l'usage (code 0) ; pour une sous-commande comme `fls expand`, l'absence de script reste une erreur `usage_error`.
+3. Sinon, s'il y a des chemins ou `--paths-from` : **lecture rapide** (`@read` normal, ou sortie brute avec `--tree`).
+4. Sinon, si `--tree` est présent et l'entrée standard est un terminal : lecture rapide de `.`.
+5. Sinon : **exécution de script**. Source du script : `--file`, puis `--clip` / `--clip-in`, puis l'entrée standard. `--tree` s'applique alors à tous les `@read` du script. Sans argument et sans source (entrée standard terminal), `fls` affiche l'usage (code 0) ; pour une sous-commande comme `fls expand`, l'absence de script reste une erreur `usage_error`.
 
 Avec des chemins, `--clip` ne lit pas le presse-papiers : il y **copie** seulement le rapport (`fls src/ --clip` copie le contexte du projet).
 
@@ -31,6 +33,7 @@ Toutes en forme longue, valeur séparée par un espace (`--max-size 100`, pas de
 
 | Option | Valeur | Rôle |
 |---|---|---|
+| `--tree` | — | lecture brute façon `treecat` : en lecture rapide, sortie brute ; dans un script, applique `@read --tree` à tous les reads |
 | `--dry-run` | — | simule, n'écrit rien |
 | `--file` | chemin | lit le script dans un fichier |
 | `--clip` | — | lit le script dans le presse-papiers et y copie le rapport |
@@ -122,7 +125,7 @@ Convention : `[x]` facultatif, `<x>` obligatoire.
 
 Arborescence (`├──`, `└──`, `│`), dossiers suffixés de `/`, liens symboliques affichés `nom -> cible` (non suivis). Dossier par défaut : `.`. Profondeur par défaut : illimitée ; `--depth 0` n'affiche que la racine. Les entrées ignorées (§7) sont exclues. Erreurs : `not_found`, `not_a_directory`, `invalid_argument`.
 
-### `@read <chemin> [A-B] [--lines A-B] [--line-numbers] [--depth N]`
+### `@read <chemin> [A-B] [--lines A-B] [--line-numbers] [--depth N] [--tree]`
 
 **Fichier** : bloc
 
@@ -134,9 +137,11 @@ Arborescence (`├──`, `└──`, `│`), dossiers suffixés de `/`, liens
 
 Avec une plage : titre `(lignes A-B sur N)`. Formes de plage : `A`, `A-B`, `A-` (jusqu'à la fin) ; `B` supérieur à la fin est ramené à la fin. Plage mal formée, `A < 1`, `B < A`, ou `A` après la dernière ligne : `invalid_argument`. `--line-numbers` préfixe chaque ligne de `numéro | ` (largeur alignée).
 
-**Dossier** (comportement `treecat`) : l'arbre (`--depth`), puis le bloc de chaque fichier non ignoré, séparés par une ligne vide. Un fichier illisible n'interrompt pas la lecture : il apparaît sous la forme `=== chemin ===` / `[omis : <code>]` / `=== fin ===` (`binary_file`, `too_large`, `not_utf8`, `symlink`).
+**Dossier** (sans `--tree`) : l'arbre filtré par ignores (`--depth`), puis le bloc de chaque fichier non ignoré, séparés par une ligne vide. Un fichier illisible n'interrompt pas la lecture : il apparaît sous la forme `=== chemin ===` / `[omis : <code>]` / `=== fin ===` (`binary_file`, `too_large`, `not_utf8`, `symlink`).
 
-Un chemin explicite n'est **jamais filtré** par les règles d'ignore.
+**Mode `--tree`** : reproduit la sortie de `bin/treecat` (arbre, puis contenu brut de chaque fichier préfixé par la continuation). Aucun ignore n'est appliqué (`.git/`, `node_modules/`, fichiers cachés inclus). Les octets sont lus tels quels (NUL supprimés, pas de validation UTF-8), un newline final est ajouté si absent. Les liens symboliques ne sont jamais suivis : `nom -> cible`. Les fichiers/dossiers illisibles donnent `[unreadable]`. Les chemins absolus et tout segment `..` sont refusés (`outside_workspace`) ; la politique fls de confinement par lien symbolique s'applique. En lecture rapide, la sortie est brute (pas de rapport fls) et `--ignore` / `--max-size` sont refusés ; dans un script, le corps du résultat est brut mais enveloppé dans le rapport fls normal. `--tree` est incompatible avec la plage positionnelle, `--lines`, `--line-numbers` et `--depth`.
+
+Un chemin explicite n'est **jamais filtré** par les règles d'ignore (mode normal).
 
 ### `@grep "<texte>" [chemin] [--context N | -C N] [--regex] [--ignore-case]`
 
@@ -185,7 +190,7 @@ Fichiers uniquement en v1 (un dossier donne `is_directory`, un lien symbolique `
 
 - **Confinement** : un chemin absolu, un chemin qui remonte au-dessus du dossier courant, ou qui traverse un lien symbolique menant hors de ce dossier : `outside_workspace`.
 - **Liens symboliques** : jamais suivis ni modifiés ; listés `nom -> cible` ; `[omis : symlink]` dans une lecture de dossier.
-- **Règles d'ignore** (pour `@tree`, `@read <dossier>`, `@grep <dossier>`) : toujours `.git/`, `node_modules/`, `.fls/` ; plus les lignes de `.gitignore` et `.flsignore` à la racine, plus `--ignore`. Syntaxe reconnue : lignes vides et `#` ignorées ; `*`, `**`, `?` ; `/` final = dossiers seulement ; un motif contenant `/` est ancré sur le chemin relatif à la racine, sinon il s'applique au nom à toute profondeur. Les lignes de négation `!` sont ignorées.
+- **Règles d'ignore** (pour `@tree`, `@read <dossier>` sans `--tree`, `@grep <dossier>`) : toujours `.git/`, `node_modules/`, `.fls/` ; plus les lignes de `.gitignore` et `.flsignore` à la racine, plus `--ignore`. Syntaxe reconnue : lignes vides et `#` ignorées ; `*`, `**`, `?` ; `/` final = dossiers seulement ; un motif contenant `/` est ancré sur le chemin relatif à la racine, sinon il s'applique au nom à toute profondeur. Les lignes de négation `!` sont ignorées. `@read --tree` / `fls --tree` n'applique aucun ignore.
 
 ## 8. Rapport
 
@@ -280,4 +285,4 @@ pnpm add -D vitest @vitest/coverage-v8
 pnpm run test:coverage
 ```
 
-La suite (87 tests) utilise de vrais dossiers temporaires, des liens symboliques réels, de vrais sous-processus pour le presse-papiers et le binaire, et exige 100 % de couverture sur statements, branches, fonctions et lignes pour tous les modules de `src/`.
+La suite utilise de vrais dossiers temporaires, des liens symboliques réels, de vrais sous-processus pour le presse-papiers, le binaire et la parité `treecat`, et exige 100 % de couverture sur statements, branches, fonctions et lignes pour tous les modules de `src/`.

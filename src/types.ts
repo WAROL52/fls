@@ -28,6 +28,8 @@ export interface Result {
 
 export interface Report {
   text: string;
+  /** Sortie brute (mode tree) : écrite telle quelle si elle n'est pas tronquée. */
+  raw?: Buffer;
   code: number;
 }
 
@@ -36,6 +38,8 @@ export type Ignore = (rel: string, isDir: boolean) => boolean;
 export interface Ctx {
   ws: Workspace;
   ignore: Ignore;
+  /** Chemin absolu de --output, pour marquer `[output file]` en mode tree. */
+  output?: string | null;
 }
 
 export interface Clipboard {
@@ -52,7 +56,7 @@ export interface Io {
   cwd: string;
   stdinIsTTY: boolean;
   readStdin(): string;
-  out(text: string): void;
+  out(text: string | Buffer): void;
   err(text: string): void;
   clipboard: Clipboard;
   now(): Date;

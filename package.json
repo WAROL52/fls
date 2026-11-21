@@ -10,8 +10,8 @@
     "install:global": "bash bin/install-fls.sh",
     "test": "pnpm run test:unit && pnpm run test:e2e && pnpm run test:coverage",
     "test:coverage": "vitest run --coverage",
-    "test:unit": "vitest run -t '^(?!.*(le binaire fonctionne|realRunner)).*'",
-    "test:e2e": "vitest run -t 'le binaire fonctionne|realRunner'",
+    "test:unit": "vitest run -t '^(?!.*(le binaire fonctionne|realRunner|treecat)).*'",
+    "test:e2e": "vitest run -t 'le binaire fonctionne|realRunner|treecat'",
     "uninstall:global": "bash bin/uninstall-fls.sh",
     "version": "node src/fls.ts --version"
   },

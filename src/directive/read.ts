@@ -1,6 +1,7 @@
 import { FlsError } from "../errors.ts";
 import { normalizeRel } from "../paths.ts";
 import { splitLines } from "../text.ts";
+import { renderTree, treeRel } from "../tree.ts";
 import type { Ctx, Op, Spec } from "../types.ts";
 import type { Workspace } from "../workspace.ts";
 import { collectFiles, directive, intOpt, treeLines } from "./shared.ts";
@@ -42,7 +43,21 @@ function readDir(ctx: Ctx, op: Op, rel: string): { title: string; body: string }
   return { title: `${label} (dossier, ${files.length} fichier(s))`, body: [tree, ...blocks].join("\n\n") };
 }
 
+function runTreeRead(ctx: Ctx, op: Op): { title: string; body: string } {
+  const conflicts = [
+    op.args.length > 1 ? "plage positionnelle" : null,
+    op.opts["lines"] !== undefined ? "--lines" : null,
+    op.opts["line-numbers"] === true ? "--line-numbers" : null,
+    op.opts["depth"] !== undefined ? "--depth" : null,
+  ].filter((c): c is string => c !== null);
+  if (conflicts.length > 0) throw new FlsError("invalid_argument", `--tree est incompatible avec ${conflicts.join(", ")}`);
+  const raw = op.args[0];
+  const label = raw === "" ? "." : raw;
+  return { title: label, body: renderTree(ctx.ws, label, treeRel(raw), ctx.output ?? null).toString("utf8") };
+}
+
 function runRead(ctx: Ctx, op: Op): { title: string; body: string } {
+  if (op.opts["tree"] === true) return runTreeRead(ctx, op);
   const rel = normalizeRel(op.args[0]);
   if (ctx.ws.kind(rel) === "dir") return readDir(ctx, op, rel);
   const wanted = op.opts["lines"] ?? op.args[1];
@@ -52,14 +67,15 @@ function runRead(ctx: Ctx, op: Op): { title: string; body: string } {
 
 export const read: Spec = directive({
   name: "read",
-  summary: "affiche un fichier (ou, pour un dossier, l'arbre puis tous les contenus, comme treecat)",
-  usage: "@read <chemin> [A-B] [--lines A-B] [--line-numbers] [--depth N]",
-  options: { lines: "value", "line-numbers": "flag", depth: "value" },
+  summary: "affiche un fichier, ou un dossier (arbre filtré puis contenus) ; --tree reproduit treecat",
+  usage: "@read <chemin> [A-B] [--lines A-B] [--line-numbers] [--depth N] [--tree]",
+  options: { lines: "value", "line-numbers": "flag", depth: "value", tree: "flag" },
   positional: [1, 2],
   optionDocs: [
     "--lines A-B : plage de lignes (A, A-B ou A-) ; la forme positionnelle `@read f 1-30` est acceptée",
     "--line-numbers : préfixe chaque ligne de son numéro",
     "--depth N : profondeur de l'arbre quand le chemin est un dossier",
+    "--tree : sortie brute façon treecat (aucun ignore, liens non suivis) ; incompatible avec les autres options",
   ],
   examples: ['@read src/user.ts\n@read "src/types/api client.ts" --lines 1-30 --line-numbers'],
   run: runRead,
