@@ -34,6 +34,9 @@ Toutes en forme longue, valeur séparée par un espace (`--max-size 100`, pas de
 | Option | Valeur | Rôle |
 |---|---|---|
 | `--tree` | — | lecture brute façon `treecat` : en lecture rapide, sortie brute ; dans un script, applique `@read --tree` à tous les reads |
+| `--color <mode>` | `auto` | `auto` colore sur TTY (stdout/stderr selon la sortie), `always` force la couleur même hors TTY/fichier/clip, `never` désactive |
+| `--colored` | — | alias de `--color=always` |
+| `--no-color` | — | alias de `--color=never` ; `NO_COLOR` est honoré en `auto` |
 | `--dry-run` | — | simule, n'écrit rien |
 | `--file` | chemin | lit le script dans un fichier |
 | `--clip` | — | lit le script dans le presse-papiers et y copie le rapport |
@@ -48,6 +51,8 @@ Toutes en forme longue, valeur séparée par un espace (`--max-size 100`, pas de
 | `--help`, `-h`, `--version` | — | aide, version |
 
 Option inconnue, valeur manquante ou nombre invalide : `usage_error`, code de sortie 2.
+
+**Couleur.** `--color=auto|always|never` (défaut `auto`), `--colored` = `always`, `--no-color` = `never`. En `auto`, la couleur s'active sur TTY et `NO_COLOR` la désactive. `always` force la couleur sur stdout/stderr, `--output` et `--clip`. `expand` reste toujours brut. `--tree --colored` colore l'arborescence et les contenus (Shiki, thème `github-dark`) ; `--tree` sans couleur conserve la parité treecat octet pour octet.
 
 ## 3. Sous-commandes
 

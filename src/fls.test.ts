@@ -58,18 +58,18 @@ function fake(cwd: string, o: FakeOpts = {}) {
   };
   return { io, out, err, clip };
 }
-function call(dir: string, argv: string[], o: FakeOpts = {}) {
+async function call(dir: string, argv: string[], o: FakeOpts = {}) {
   const f = fake(dir, o);
-  const code = fls.main(argv, f.io);
+  const code = await fls.main(argv, f.io);
   return { code, text: f.out.join(""), errText: f.err.join(""), clip: f.clip };
 }
-function run(argv: string[], files: Files = {}, o: FakeOpts & { setup?: (dir: string) => void } = {}) {
+async function run(argv: string[], files: Files = {}, o: FakeOpts & { setup?: (dir: string) => void } = {}) {
   const dir = sb(files);
   if (o.setup !== undefined) o.setup(dir);
-  return { dir, ...call(dir, argv, o) };
+  return { dir, ...(await call(dir, argv, o)) };
 }
-const script = (s: string, files: Files = {}, argv: string[] = [], o: FakeOpts & { setup?: (dir: string) => void } = {}) =>
-  run(argv, files, { stdin: s, ...o });
+const script = async (s: string, files: Files = {}, argv: string[] = [], o: FakeOpts & { setup?: (dir: string) => void } = {}) =>
+  await run(argv, files, { stdin: s, ...o });
 const content = (name: string, file: string, body: string): string => `@${name} ${file}\n<<<<<<< CONTENT\n${body}\n>>>>>>> END\n`;
 const edit = (file: string, search: string, replace: string): string =>
   `@edit ${file}\n<<<<<<< SEARCH\n${search}\n=======\n${replace}\n>>>>>>> REPLACE\n`;
@@ -77,14 +77,14 @@ const edit = (file: string, search: string, replace: string): string =>
 // ───────────────────────────── Texte ─────────────────────────────
 
 describe("texte", () => {
-  it("splitLines", () => {
+  it("splitLines", async () => {
     expect(fls.splitLines("")).toEqual([]);
     expect(fls.splitLines("a\nb\n")).toEqual(["a", "b"]);
     expect(fls.splitLines("a\r\nb")).toEqual(["a", "b"]);
     expect(fls.splitLines("\n")).toEqual([""]);
   });
 
-  it("quote", () => {
+  it("quote", async () => {
     expect(fls.quote("abc")).toBe("abc");
     expect(fls.quote("a b")).toBe('"a b"');
     expect(fls.quote("")).toBe('""');
@@ -92,7 +92,7 @@ describe("texte", () => {
     expect(fls.quote('a"b\\c')).toBe('"a\\"b\\\\c"');
   });
 
-  it("tokenize", () => {
+  it("tokenize", async () => {
     expect(fls.tokenize('@read "a b" c')).toEqual([
       { text: "@read", quoted: false },
       { text: "a b", quoted: true },
@@ -107,7 +107,7 @@ describe("texte", () => {
     expect(fls.tokenize('x "abc')).toBeNull();
   });
 
-  it("normalizeRel", () => {
+  it("normalizeRel", async () => {
     expect(fls.normalizeRel(".")).toBe("");
     expect(fls.normalizeRel("")).toBe("");
     expect(fls.normalizeRel("src/")).toBe("src");
@@ -120,7 +120,7 @@ describe("texte", () => {
 });
 
 describe("ignore", () => {
-  it("motifs", () => {
+  it("motifs", async () => {
     const ig = fls.compileIgnore(["# commentaire", "", "!garde", "*.log", "dist/", "/build", "src/gen/*.ts", "a/**/z", "?x"]);
     expect(ig("app.log", false)).toBe(true);
     expect(ig("deep/er/app.log", false)).toBe(true);
@@ -140,7 +140,7 @@ describe("ignore", () => {
 // ───────────────────────────── Workspace ─────────────────────────────
 
 describe("Workspace", () => {
-  it("kind, requireFile, get, text", () => {
+  it("kind, requireFile, get, text", async () => {
     const dir = sb({ "a.txt": "hello\n", "d/x.txt": "x", "big.txt": "0123456789", "bin.dat": Buffer.from([1, 0, 2]), "bad.txt": Buffer.from([0xc3, 0x28]) });
     fs.symlinkSync("a.txt", path.join(dir, "lnk"));
     const ws = new fls.Workspace(dir, 6);
@@ -159,7 +159,7 @@ describe("Workspace", () => {
     expect(() => ws.text("bad.txt")).toThrow(/UTF-8/);
   });
 
-  it("surcouche : write, remove, move, list, kind virtuel", () => {
+  it("surcouche : write, remove, move, list, kind virtuel", async () => {
     const dir = sb({ "src/a.ts": "a", "src/lib/b.ts": "b", "top.txt": "t", "run.sh": "#!/bin/sh\n" });
     fs.chmodSync(path.join(dir, "run.sh"), 0o755);
     const ws = new fls.Workspace(dir, 1000);
@@ -184,7 +184,7 @@ describe("Workspace", () => {
     expect(ws.modeOf("absent.txt")).toBe(0o644);
   });
 
-  it("surcouche : erreurs d'écriture", () => {
+  it("surcouche : erreurs d'écriture", async () => {
     const dir = sb({ "d/x.txt": "x", "f.txt": "f" });
     fs.symlinkSync("f.txt", path.join(dir, "lnk"));
     const ws = new fls.Workspace(dir, 1000);
@@ -193,7 +193,7 @@ describe("Workspace", () => {
     expect(() => ws.write("f.txt/sub.txt", Buffer.from("x"))).toThrow(/est un fichier/);
   });
 
-  it("resolve refuse les liens sortants", () => {
+  it("resolve refuse les liens sortants", async () => {
     const outside = sb({ "secret.txt": "s" });
     const dir = sb({});
     fs.symlinkSync(outside, path.join(dir, "out"));
@@ -203,7 +203,7 @@ describe("Workspace", () => {
     expect(() => ws.write("out/new.txt", Buffer.from("x"))).toThrow(/lien symbolique/);
   });
 
-  it("pending ignore les no-ops, apply écrit et sauvegarde", () => {
+  it("pending ignore les no-ops, apply écrit et sauvegarde", async () => {
     const dir = sb({ "keep.txt": "same", "edit.txt": "old", "gone.txt": "bye" });
     const ws = new fls.Workspace(dir, 1000);
     ws.write("keep.txt", Buffer.from("same"));
@@ -233,7 +233,7 @@ describe("Workspace", () => {
 // ───────────────────────────── Parseur ─────────────────────────────
 
 describe("parseScript", () => {
-  it("script complet", () => {
+  it("script complet", async () => {
     const ops = fls.parseScript(
       [
         "# commentaire",
@@ -296,12 +296,12 @@ describe("parseScript", () => {
     ["CONTENT non fermé", "@create f\n<<<<<<< CONTENT\nx", /marqueur >>>>>>> END manquant/],
   ];
   for (const [name, text, re] of bad) {
-    it(`erreur : ${name}`, () => {
+    it(`erreur : ${name}`, async () => {
       expect(() => fls.parseScript(text)).toThrow(re);
     });
   }
 
-  it("sérialisation : aller-retour stable", () => {
+  it("sérialisation : aller-retour stable", async () => {
     const text = [
       '@read "a b.ts" 2 --line-numbers',
       "@grep needle src -C 2 --regex",
@@ -336,8 +336,8 @@ describe("@tree", () => {
   const files: Files = { "src/a.ts": "a\n", "src/lib/b.ts": "b\n", "README.md": "# hi\n", ".git/config": "x", "node_modules/x/index.js": "y" };
   const setup = (dir: string) => fs.symlinkSync("README.md", path.join(dir, "link"));
 
-  it("racine, ignores et liens", () => {
-    const r = script("@tree\n", files, [], { setup });
+  it("racine, ignores et liens", async () => {
+    const r = await script("@tree\n", files, [], { setup });
     expect(r.code).toBe(0);
     expect(r.text).toContain("├── README.md");
     expect(r.text).toContain("├── link -> README.md");
@@ -349,23 +349,23 @@ describe("@tree", () => {
     expect(r.text).toContain("fls 1.0.0 | run r1 |");
   });
 
-  it("dossier non terminal : le tronc continue", () => {
-    const r = script("@tree\n", { "a/x.txt": "x", "b.txt": "b" });
+  it("dossier non terminal : le tronc continue", async () => {
+    const r = await script("@tree\n", { "a/x.txt": "x", "b.txt": "b" });
     expect(r.text).toContain("├── a/\n│   └── x.txt\n└── b.txt");
   });
 
-  it("profondeur, dossiers seuls, profondeur 0", () => {
-    expect(script("@tree src --depth 1\n", files).text).not.toContain("b.ts");
-    const dirsOnly = script("@tree src --dirs-only\n", files).text;
+  it("profondeur, dossiers seuls, profondeur 0", async () => {
+    expect((await script("@tree src --depth 1\n", files)).text).not.toContain("b.ts");
+    const dirsOnly = (await script("@tree src --dirs-only\n", files)).text;
     expect(dirsOnly).toContain("lib/");
     expect(dirsOnly).not.toContain("a.ts");
-    expect(script("@tree src --depth 0\n", files).text).not.toContain("a.ts");
+    expect((await script("@tree src --depth 0\n", files)).text).not.toContain("a.ts");
   });
 
-  it("erreurs", () => {
-    expect(script("@tree nope\n", files).text).toContain("not_found");
-    expect(script("@tree README.md\n", files).text).toContain("not_a_directory");
-    const r = script("@tree --depth abc\n", files);
+  it("erreurs", async () => {
+    expect((await script("@tree nope\n", files)).text).toContain("not_found");
+    expect((await script("@tree README.md\n", files)).text).toContain("not_a_directory");
+    const r = await script("@tree --depth abc\n", files);
     expect(r.code).toBe(1);
     expect(r.text).toContain("invalid_argument");
   });
@@ -374,29 +374,29 @@ describe("@tree", () => {
 describe("@read", () => {
   const files: Files = { "f.txt": "l1\nl2\nl3\nl4\n", "empty.txt": "" };
 
-  it("fichier entier, plages et numéros de ligne", () => {
-    const all = script("@read f.txt\n", files).text;
+  it("fichier entier, plages et numéros de ligne", async () => {
+    const all = (await script("@read f.txt\n", files)).text;
     expect(all).toContain("=== f.txt (4 lignes) ===\nl1\nl2\nl3\nl4\n=== fin ===");
-    expect(script("@read f.txt --lines 2-3\n", files).text).toContain("=== f.txt (lignes 2-3 sur 4) ===\nl2\nl3\n");
-    expect(script("@read f.txt 2-3\n", files).text).toContain("(lignes 2-3 sur 4)");
-    expect(script("@read f.txt 3-\n", files).text).toContain("(lignes 3-4 sur 4)");
-    expect(script("@read f.txt 2\n", files).text).toContain("(lignes 2-2 sur 4)");
-    expect(script("@read f.txt 3-99\n", files).text).toContain("(lignes 3-4 sur 4)");
-    expect(script("@read f.txt --line-numbers --lines 3-4\n", files).text).toContain("3 | l3\n4 | l4");
-    expect(script("@read empty.txt\n", files).text).toContain("(0 lignes)");
+    expect((await script("@read f.txt --lines 2-3\n", files)).text).toContain("=== f.txt (lignes 2-3 sur 4) ===\nl2\nl3\n");
+    expect((await script("@read f.txt 2-3\n", files)).text).toContain("(lignes 2-3 sur 4)");
+    expect((await script("@read f.txt 3-\n", files)).text).toContain("(lignes 3-4 sur 4)");
+    expect((await script("@read f.txt 2\n", files)).text).toContain("(lignes 2-2 sur 4)");
+    expect((await script("@read f.txt 3-99\n", files)).text).toContain("(lignes 3-4 sur 4)");
+    expect((await script("@read f.txt --line-numbers --lines 3-4\n", files)).text).toContain("3 | l3\n4 | l4");
+    expect((await script("@read empty.txt\n", files)).text).toContain("(0 lignes)");
   });
 
-  it("plages invalides et fichier absent", () => {
+  it("plages invalides et fichier absent", async () => {
     for (const bad of ["abc", "5-2", "0", "9-9"]) {
-      const r = script(`@read f.txt ${bad}\n`, files);
+      const r = await script(`@read f.txt ${bad}\n`, files);
       expect(r.code).toBe(1);
       expect(r.text).toContain("invalid_argument");
     }
-    expect(script("@read nope.txt\n", files).text).toContain("not_found");
+    expect((await script("@read nope.txt\n", files)).text).toContain("not_found");
   });
 
-  it("dossier : arbre puis contenus, avec omissions", () => {
-    const r = script(
+  it("dossier : arbre puis contenus, avec omissions", async () => {
+    const r = await script(
       "@read .\n@read . --depth 1 --line-numbers\n",
       { "a.txt": "A\n", "sub/b.txt": "B\n", "bin.dat": Buffer.from([1, 0, 2]), "big.txt": "x".repeat(200) },
       ["--max-size", "100"],
@@ -411,8 +411,8 @@ describe("@read", () => {
     expect(r.text).toContain("1 | A");
   });
 
-  it("dossier nommé", () => {
-    expect(script("@read src\n", { "src/a.txt": "A\n" }).text).toContain("READ src (dossier, 1 fichier(s))");
+  it("dossier nommé", async () => {
+    expect((await script("@read src\n", { "src/a.txt": "A\n" })).text).toContain("READ src (dossier, 1 fichier(s))");
   });
 });
 
@@ -423,38 +423,38 @@ describe("@grep", () => {
     "bin.dat": Buffer.from([102, 111, 111, 0]),
   };
 
-  it("contexte, séparateurs et comptage", () => {
-    const r = script('@grep "foo" . --context 1\n', files).text;
+  it("contexte, séparateurs et comptage", async () => {
+    const r = (await script('@grep "foo" . --context 1\n', files)).text;
     expect(r).toContain('"foo" dans . (3 correspondance(s) dans 2 fichier(s))');
     expect(r).toContain("a.txt-1- one\na.txt:2: foo\na.txt-3- three\n--\na.txt-5- five\na.txt:6: foo bar\na.txt-7- seven\n--\nb.txt-1- FOO\nb.txt:2: foo");
   });
 
-  it("chemin par défaut : le dossier courant", () => {
-    expect(script('@grep "FOO"\n', files).text).toContain('"FOO" dans . (1 correspondance(s) dans 1 fichier(s))');
+  it("chemin par défaut : le dossier courant", async () => {
+    expect((await script('@grep "FOO"\n', files)).text).toContain('"FOO" dans . (1 correspondance(s) dans 1 fichier(s))');
   });
 
-  it("contexte contigu fusionné, forme -C", () => {
-    const r = script('@grep "foo" . -C 2\n', files).text;
+  it("contexte contigu fusionné, forme -C", async () => {
+    const r = (await script('@grep "foo" . -C 2\n', files)).text;
     expect(r.match(/^--$/gm)).toHaveLength(1);
   });
 
-  it("regex, casse, fichier précis, dossier précis", () => {
-    expect(script('@grep "^f.o$" b.txt --regex\n', files).text).toContain("(1 correspondance(s) dans 1 fichier(s))");
-    expect(script('@grep "foo" b.txt --ignore-case\n', files).text).toContain("(2 correspondance(s) dans 1 fichier(s))");
-    expect(script('@grep "a.c" a.txt\n', files).text).toContain("(0 correspondance(s) dans 0 fichier(s))");
-    expect(script('@grep "x" sub\n', { "sub/s.txt": "x\n" }).text).toContain('"x" dans sub (1 correspondance(s)');
+  it("regex, casse, fichier précis, dossier précis", async () => {
+    expect((await script('@grep "^f.o$" b.txt --regex\n', files)).text).toContain("(1 correspondance(s) dans 1 fichier(s))");
+    expect((await script('@grep "foo" b.txt --ignore-case\n', files)).text).toContain("(2 correspondance(s) dans 1 fichier(s))");
+    expect((await script('@grep "a.c" a.txt\n', files)).text).toContain("(0 correspondance(s) dans 0 fichier(s))");
+    expect((await script('@grep "x" sub\n', { "sub/s.txt": "x\n" })).text).toContain('"x" dans sub (1 correspondance(s)');
   });
 
-  it("erreurs", () => {
-    expect(script('@grep "(" a.txt --regex\n', files).text).toContain("invalid_argument");
-    expect(script('@grep "x" nope.txt\n', files).text).toContain("not_found");
-    expect(script('@grep "foo" bin.dat\n', files).text).toContain("binary_file");
+  it("erreurs", async () => {
+    expect((await script('@grep "(" a.txt --regex\n', files)).text).toContain("invalid_argument");
+    expect((await script('@grep "x" nope.txt\n', files)).text).toContain("not_found");
+    expect((await script('@grep "foo" bin.dat\n', files)).text).toContain("binary_file");
   });
 });
 
 describe("@note", () => {
-  it("annote le rapport", () => {
-    expect(script('@note "étape 1"\n').text).toContain("[1] OK    NOTE étape 1");
+  it("annote le rapport", async () => {
+    expect((await script('@note "étape 1"\n')).text).toContain("[1] OK    NOTE étape 1");
   });
 });
 
@@ -463,10 +463,10 @@ describe("@note", () => {
 describe("@edit", () => {
   const user = "export interface User {\n  id: string\n  name: string\n}\n\nexport function make(id, name) {\n  return { id, name }\n}\n";
 
-  it("plusieurs blocs, diff dans le rapport", () => {
+  it("plusieurs blocs, diff dans le rapport", async () => {
     const text =
       "@edit user.ts\n<<<<<<< SEARCH\n  name: string\n}\n=======\n  name: string\n  role: string\n}\n>>>>>>> REPLACE\n<<<<<<< SEARCH\n  return { id, name }\n=======\n  return { id, name, role: 'x' }\n>>>>>>> REPLACE\n";
-    const r = script(text, { "user.ts": user });
+    const r = await script(text, { "user.ts": user });
     expect(r.code).toBe(0);
     expect(read(r.dir, "user.ts")).toContain("  role: string\n}");
     expect(read(r.dir, "user.ts")).toContain("return { id, name, role: 'x' }");
@@ -476,90 +476,90 @@ describe("@edit", () => {
     expect(r.text).toContain("Annulable avec : fls undo");
   });
 
-  it("introuvable avec ligne proche, ou sans ligne proche", () => {
-    const near = script(edit("user.ts", "  return { id, nam }", "x"), { "user.ts": user });
+  it("introuvable avec ligne proche, ou sans ligne proche", async () => {
+    const near = await script(edit("user.ts", "  return { id, nam }", "x"), { "user.ts": user });
     expect(near.code).toBe(1);
     expect(near.text).toContain("not_found");
     expect(near.text).toContain('ligne la plus proche (l.7) : "return { id, name }"');
-    const none = script(edit("u.txt", "~", "x"), { "u.txt": "ab\n\ncd\n" });
+    const none = await script(edit("u.txt", "~", "x"), { "u.txt": "ab\n\ncd\n" });
     expect(none.text).toContain("aucune ligne proche");
   });
 
-  it("ambigu", () => {
-    const r = script(edit("x.txt", "x", "y"), { "x.txt": "x\nx\n" });
+  it("ambigu", async () => {
+    const r = await script(edit("x.txt", "x", "y"), { "x.txt": "x\nx\n" });
     expect(r.text).toContain("ambiguous_match");
     expect(r.text).toContain("trouvé 2 fois");
     expect(r.text).toContain("lignes 1, 2");
   });
 
-  it("atomique : un bloc faux n'écrit rien", () => {
+  it("atomique : un bloc faux n'écrit rien", async () => {
     const text = `${edit("f.txt", "a", "A")}<<<<<<< SEARCH\nzzz\n=======\nq\n>>>>>>> REPLACE\n`;
-    const r = script(text, { "f.txt": "a\n" });
+    const r = await script(text, { "f.txt": "a\n" });
     expect(r.code).toBe(1);
     expect(read(r.dir, "f.txt")).toBe("a\n");
     expect(exists(r.dir, ".fls")).toBe(false);
   });
 
-  it("fins de ligne CRLF conservées", () => {
-    const r = script(edit("c.txt", "a\nb", "A\nB"), { "c.txt": "a\r\nb\r\nc\r\n" });
+  it("fins de ligne CRLF conservées", async () => {
+    const r = await script(edit("c.txt", "a\nb", "A\nB"), { "c.txt": "a\r\nb\r\nc\r\n" });
     expect(read(r.dir, "c.txt")).toBe("A\r\nB\r\nc\r\n");
   });
 
-  it("REPLACE vide : suppression de lignes entières ou de texte", () => {
-    expect(read(script(edit("f", "b", ""), { f: "a\nb\nc\n" }).dir, "f")).toBe("a\nc\n");
-    expect(read(script(edit("f", "a", ""), { f: "a\nb\n" }).dir, "f")).toBe("b\n");
-    expect(read(script(edit("f", "def", ""), { f: "abc def\n" }).dir, "f")).toBe("abc \n");
-    expect(read(script(edit("f", "abc", ""), { f: "abc def\n" }).dir, "f")).toBe(" def\n");
-    expect(read(script(edit("f", "abc", ""), { f: "x\nabc def\n" }).dir, "f")).toBe("x\n def\n");
-    expect(read(script(edit("f", "b\nc", ""), { f: "a\r\nb\r\nc\r\nd\r\n" }).dir, "f")).toBe("a\r\nd\r\n");
+  it("REPLACE vide : suppression de lignes entières ou de texte", async () => {
+    expect(read((await script(edit("f", "b", ""), { f: "a\nb\nc\n" })).dir, "f")).toBe("a\nc\n");
+    expect(read((await script(edit("f", "a", ""), { f: "a\nb\n" })).dir, "f")).toBe("b\n");
+    expect(read((await script(edit("f", "def", ""), { f: "abc def\n" })).dir, "f")).toBe("abc \n");
+    expect(read((await script(edit("f", "abc", ""), { f: "abc def\n" })).dir, "f")).toBe(" def\n");
+    expect(read((await script(edit("f", "abc", ""), { f: "x\nabc def\n" })).dir, "f")).toBe("x\n def\n");
+    expect(read((await script(edit("f", "b\nc", ""), { f: "a\r\nb\r\nc\r\nd\r\n" })).dir, "f")).toBe("a\r\nd\r\n");
   });
 
-  it("erreurs de fichier", () => {
-    expect(script(edit("nope.txt", "a", "b")).text).toContain("not_found");
-    expect(script(edit("bin", "a", "b"), { bin: Buffer.from([0, 1]) }).text).toContain("binary_file");
+  it("erreurs de fichier", async () => {
+    expect((await script(edit("nope.txt", "a", "b"))).text).toContain("not_found");
+    expect((await script(edit("bin", "a", "b"), { bin: Buffer.from([0, 1]) })).text).toContain("binary_file");
   });
 });
 
 describe("@create, @overwrite, @write, @append", () => {
-  it("create", () => {
-    const r = script(content("create", "sub/new.txt", "l1\nl2"));
+  it("create", async () => {
+    const r = await script(content("create", "sub/new.txt", "l1\nl2"));
     expect(read(r.dir, "sub/new.txt")).toBe("l1\nl2\n");
     expect(r.text).toContain("CREATE sub/new.txt (nouveau, 2 lignes)");
-    expect(script(content("create", "x.txt", "y"), { "x.txt": "z" }).text).toContain("already_exists");
-    expect(script("@create e.txt\n<<<<<<< CONTENT\n>>>>>>> END\n").text).toContain("(nouveau, 0 lignes)");
+    expect((await script(content("create", "x.txt", "y"), { "x.txt": "z" })).text).toContain("already_exists");
+    expect((await script("@create e.txt\n<<<<<<< CONTENT\n>>>>>>> END\n")).text).toContain("(nouveau, 0 lignes)");
   });
 
-  it("overwrite", () => {
-    const r = script(content("overwrite", "x.txt", "new"), { "x.txt": "old" });
+  it("overwrite", async () => {
+    const r = await script(content("overwrite", "x.txt", "new"), { "x.txt": "old" });
     expect(read(r.dir, "x.txt")).toBe("new\n");
     expect(r.text).toContain("(remplacé, 1 lignes)");
-    expect(script(content("overwrite", "x.txt", "n")).text).toContain("not_found");
+    expect((await script(content("overwrite", "x.txt", "n"))).text).toContain("not_found");
   });
 
-  it("write crée ou remplace", () => {
-    expect(read(script(content("write", "x.txt", "a")).dir, "x.txt")).toBe("a\n");
-    expect(read(script(content("write", "x.txt", "b"), { "x.txt": "a" }).dir, "x.txt")).toBe("b\n");
+  it("write crée ou remplace", async () => {
+    expect(read((await script(content("write", "x.txt", "a"))).dir, "x.txt")).toBe("a\n");
+    expect(read((await script(content("write", "x.txt", "b"), { "x.txt": "a" })).dir, "x.txt")).toBe("b\n");
   });
 
-  it("append", () => {
-    expect(read(script(content("append", "x.txt", "b"), { "x.txt": "a\n" }).dir, "x.txt")).toBe("a\nb\n");
-    expect(read(script(content("append", "x.txt", "b"), { "x.txt": "a" }).dir, "x.txt")).toBe("a\nb\n");
-    expect(read(script(content("append", "x.txt", "b"), { "x.txt": "" }).dir, "x.txt")).toBe("b\n");
-    const created = script(content("append", "y.txt", "b"));
+  it("append", async () => {
+    expect(read((await script(content("append", "x.txt", "b"), { "x.txt": "a\n" })).dir, "x.txt")).toBe("a\nb\n");
+    expect(read((await script(content("append", "x.txt", "b"), { "x.txt": "a" })).dir, "x.txt")).toBe("a\nb\n");
+    expect(read((await script(content("append", "x.txt", "b"), { "x.txt": "" })).dir, "x.txt")).toBe("b\n");
+    const created = await script(content("append", "y.txt", "b"));
     expect(read(created.dir, "y.txt")).toBe("b\n");
     expect(created.text).toContain("APPEND y.txt (+1 lignes)");
-    expect(script(content("append", "d", "b"), { "d/f": "x" }).text).toContain("is_directory");
+    expect((await script(content("append", "d", "b"), { "d/f": "x" })).text).toContain("is_directory");
   });
 
-  it("erreurs d'emplacement", () => {
-    expect(script(content("write", "d", "b"), { "d/f": "x" }).text).toContain("is_directory");
-    expect(script(content("write", "f/sub.txt", "b"), { f: "x" }).text).toContain("not_a_directory");
-    const link = script(content("write", "lnk", "b"), { "t.txt": "x" }, [], { setup: (d) => fs.symlinkSync("t.txt", path.join(d, "lnk")) });
+  it("erreurs d'emplacement", async () => {
+    expect((await script(content("write", "d", "b"), { "d/f": "x" })).text).toContain("is_directory");
+    expect((await script(content("write", "f/sub.txt", "b"), { f: "x" })).text).toContain("not_a_directory");
+    const link = await script(content("write", "lnk", "b"), { "t.txt": "x" }, [], { setup: (d) => fs.symlinkSync("t.txt", path.join(d, "lnk")) });
     expect(link.text).toContain("symlink");
   });
 
-  it("un contenu identique n'est pas un changement", () => {
-    const r = script(content("overwrite", "x.txt", "same"), { "x.txt": "same\n" });
+  it("un contenu identique n'est pas un changement", async () => {
+    const r = await script(content("overwrite", "x.txt", "same"), { "x.txt": "same\n" });
     expect(r.code).toBe(0);
     expect(r.text).toContain("Modifiés : aucun");
     expect(exists(r.dir, ".fls")).toBe(false);
@@ -567,27 +567,27 @@ describe("@create, @overwrite, @write, @append", () => {
 });
 
 describe("@delete, @move", () => {
-  it("delete", () => {
-    const r = script("@delete a.txt\n", { "a.txt": "x" });
+  it("delete", async () => {
+    const r = await script("@delete a.txt\n", { "a.txt": "x" });
     expect(exists(r.dir, "a.txt")).toBe(false);
-    expect(script("@delete nope\n").text).toContain("not_found");
-    expect(script("@delete d\n", { "d/x": "x" }).text).toContain("is_directory");
+    expect((await script("@delete nope\n")).text).toContain("not_found");
+    expect((await script("@delete d\n", { "d/x": "x" })).text).toContain("is_directory");
   });
 
-  it("move conserve le mode et refuse d'écraser", () => {
-    const r = script("@move run.sh bin/run.sh\n", { "run.sh": "#!/bin/sh\n" }, [], { setup: (d) => fs.chmodSync(path.join(d, "run.sh"), 0o755) });
+  it("move conserve le mode et refuse d'écraser", async () => {
+    const r = await script("@move run.sh bin/run.sh\n", { "run.sh": "#!/bin/sh\n" }, [], { setup: (d) => fs.chmodSync(path.join(d, "run.sh"), 0o755) });
     expect(exists(r.dir, "run.sh")).toBe(false);
     expect(fs.statSync(path.join(r.dir, "bin/run.sh")).mode & 0o777).toBe(0o755);
-    expect(script("@move a b\n", { a: "1", b: "2" }).text).toContain("already_exists");
-    expect(script("@move nope b\n").text).toContain("not_found");
-    expect(script("@move d e\n", { "d/x": "x" }).text).toContain("is_directory");
+    expect((await script("@move a b\n", { a: "1", b: "2" })).text).toContain("already_exists");
+    expect((await script("@move nope b\n")).text).toContain("not_found");
+    expect((await script("@move d e\n", { "d/x": "x" })).text).toContain("is_directory");
   });
 });
 
 // ───────────────────────────── Exécution, politique d'échec, chemins ─────────────────────────────
 
 describe("exécution", () => {
-  it("après un échec d'écriture : écritures SKIP, lectures et lectures échouées sans blocage", () => {
+  it("après un échec d'écriture : écritures SKIP, lectures et lectures échouées sans blocage", async () => {
     const text = [
       "@read missing.txt\n",
       content("create", "one.txt", "1"),
@@ -595,7 +595,7 @@ describe("exécution", () => {
       content("create", "two.txt", "2"),
       "@read one.txt",
     ].join("");
-    const r = script(text);
+    const r = await script(text);
     expect(r.code).toBe(1);
     expect(exists(r.dir, "one.txt")).toBe(true);
     expect(exists(r.dir, "two.txt")).toBe(false);
@@ -605,32 +605,32 @@ describe("exécution", () => {
     expect(r.text).toContain("Résumé : 2 OK, 2 FAIL, 1 SKIP");
   });
 
-  it("les lectures voient l'état simulé (dossiers virtuels, suppressions)", () => {
+  it("les lectures voient l'état simulé (dossiers virtuels, suppressions)", async () => {
     const text = [content("create", "gen/new.txt", "n"), "@delete old.txt\n", "@tree\n", "@read gen\n"].join("");
-    const r = script(text, { "old.txt": "o" });
+    const r = await script(text, { "old.txt": "o" });
     expect(r.text).toContain("└── gen/\n    └── new.txt");
     expect(r.text).not.toContain("old.txt\n└");
     expect(r.text).toContain("=== gen/new.txt (1 lignes) ===");
   });
 
-  it("chemins hors du dossier", () => {
-    expect(script("@read /etc/hostname\n").text).toContain("outside_workspace");
-    expect(script("@read ../x\n").text).toContain("outside_workspace");
+  it("chemins hors du dossier", async () => {
+    expect((await script("@read /etc/hostname\n")).text).toContain("outside_workspace");
+    expect((await script("@read ../x\n")).text).toContain("outside_workspace");
     const outside = sb({ "secret.txt": "s" });
-    const r = script(`${"@read out/secret.txt\n"}${content("create", "out/new.txt", "x")}`, {}, [], { setup: (d) => fs.symlinkSync(outside, path.join(d, "out")) });
+    const r = await script(`${"@read out/secret.txt\n"}${content("create", "out/new.txt", "x")}`, {}, [], { setup: (d) => fs.symlinkSync(outside, path.join(d, "out")) });
     expect(r.text).toContain("outside_workspace");
     expect(exists(outside, "new.txt")).toBe(false);
   });
 
-  it("ignore : .gitignore, .flsignore et --ignore", () => {
+  it("ignore : .gitignore, .flsignore et --ignore", async () => {
     const files: Files = { ".gitignore": "ignored.txt\n", ".flsignore": "*.tmp\n", "ignored.txt": "1", "x.tmp": "2", "skip.bak": "3", "keep.txt": "4" };
-    const r = script("@tree\n", files, ["--ignore", "*.bak"]);
+    const r = await script("@tree\n", files, ["--ignore", "*.bak"]);
     expect(r.text).toContain("keep.txt");
     for (const hidden of ["ignored.txt", "x.tmp", "skip.bak"]) expect(r.text).not.toContain(hidden);
   });
 
-  it("--dry-run : simule sans écrire", () => {
-    const r = script(`${content("create", "n.txt", "x")}@read n.txt\n`, {}, ["--dry-run"]);
+  it("--dry-run : simule sans écrire", async () => {
+    const r = await script(`${content("create", "n.txt", "x")}@read n.txt\n`, {}, ["--dry-run"]);
     expect(r.code).toBe(0);
     expect(exists(r.dir, "n.txt")).toBe(false);
     expect(exists(r.dir, ".fls")).toBe(false);
@@ -640,8 +640,8 @@ describe("exécution", () => {
     expect(r.text).not.toContain("Annulable");
   });
 
-  it("script vide", () => {
-    const r = script("");
+  it("script vide", async () => {
+    const r = await script("");
     expect(r.code).toBe(0);
     expect(r.text).toContain("Résumé : 0 OK, 0 FAIL, 0 SKIP");
   });
@@ -650,140 +650,140 @@ describe("exécution", () => {
 // ───────────────────────────── Sources de script, lecture rapide, sorties ─────────────────────────────
 
 describe("sources et sorties", () => {
-  it("--file, relatif au dossier courant", () => {
-    const r = run(["--file", "s.fls"], { "s.fls": "@note ok\n" });
+  it("--file, relatif au dossier courant", async () => {
+    const r = await run(["--file", "s.fls"], { "s.fls": "@note ok\n" });
     expect(r.text).toContain("NOTE ok");
   });
 
-  it("--clip lit le presse-papiers et y copie le rapport ; --clip-in et --clip-out séparés", () => {
-    const both = run(["--clip"], {}, { clipboard: "@note via-clip\n" });
+  it("--clip lit le presse-papiers et y copie le rapport ; --clip-in et --clip-out séparés", async () => {
+    const both = await run(["--clip"], {}, { clipboard: "@note via-clip\n" });
     expect(both.text).toContain("NOTE via-clip");
     expect(both.clip.text).toBe(both.text);
-    const clipIn = run(["--clip-in"], {}, { clipboard: "@note seul\n" });
+    const clipIn = await run(["--clip-in"], {}, { clipboard: "@note seul\n" });
     expect(clipIn.clip.text).toBe("@note seul\n");
-    const clipOut = run(["--clip-out"], {}, { stdin: "@note out\n" });
+    const clipOut = await run(["--clip-out"], {}, { stdin: "@note out\n" });
     expect(clipOut.clip.text).toBe(clipOut.text);
   });
 
-  it("sans argument : affiche l'usage", () => {
-    const r = run([], {}, { tty: true });
+  it("sans argument : affiche l'usage", async () => {
+    const r = await run([], {}, { tty: true });
     expect(r.code).toBe(0);
     expect(r.text).toContain("Usage :");
     expect(r.errText).toBe("");
   });
 
-  it("expand sans script : erreur d'usage", () => {
-    const r = run(["expand"], {}, { tty: true });
+  it("expand sans script : erreur d'usage", async () => {
+    const r = await run(["expand"], {}, { tty: true });
     expect(r.code).toBe(2);
     expect(r.errText).toContain("usage_error");
     expect(r.errText).toContain("aucun script");
   });
 
-  it("lecture rapide : chemins, --paths-from, --output, --clip", () => {
+  it("lecture rapide : chemins, --paths-from, --output, --clip", async () => {
     const files: Files = { "src/a.ts": "A\n", "lib/b.ts": "B\n", "list.txt": "src\n\nlib/b.ts\n" };
-    const q = run(["src/", "lib/b.ts"], files);
+    const q = await run(["src/", "lib/b.ts"], files);
     expect(q.code).toBe(0);
     expect(q.text).toContain("[1] OK    READ src (dossier, 1 fichier(s))");
     expect(q.text).toContain("[2] OK    READ lib/b.ts (1 lignes)");
-    const fromFile = run(["--paths-from", "list.txt"], files);
+    const fromFile = await run(["--paths-from", "list.txt"], files);
     expect(fromFile.text).toContain("[2] OK    READ lib/b.ts");
-    const out = run(["src", "--output", "rapport.txt"], files);
+    const out = await run(["src", "--output", "rapport.txt"], files);
     expect(out.text).toBe("");
     expect(read(out.dir, "rapport.txt")).toContain("READ src");
-    const clip = run(["src", "--clip"], files);
+    const clip = await run(["src", "--clip"], files);
     expect(clip.clip.text).toBe(clip.text);
-    expect(run(["absent"], files).code).toBe(1);
+    expect((await run(["absent"], files)).code).toBe(1);
   });
 
-  it("troncature du rapport et validation des nombres", () => {
+  it("troncature du rapport et validation des nombres", async () => {
     const files: Files = { "a.txt": "x".repeat(500) };
-    const r = run(["a.txt", "--max-output-chars", "100"], files);
+    const r = await run(["a.txt", "--max-output-chars", "100"], files);
     expect(r.text.startsWith("fls 1.0.0")).toBe(true);
     expect(r.text).toMatch(/\[rapport tronqué : \d+ caractères omis/);
     for (const bad of ["0", "abc"]) {
-      const e = run(["a.txt", "--max-output-chars", bad], files);
+      const e = await run(["a.txt", "--max-output-chars", bad], files);
       expect(e.code).toBe(2);
       expect(e.errText).toContain("usage_error");
     }
-    expect(run(["a.txt", "--max-size", "0"], files).code).toBe(2);
+    expect((await run(["a.txt", "--max-size", "0"], files)).code).toBe(2);
   });
 
-  it("expand affiche le script plat", () => {
-    const r = script('# c\n@grep "a b" . -C 2\n@read f 1-2\n', {}, ["expand"]);
+  it("expand affiche le script plat", async () => {
+    const r = await script('# c\n@grep "a b" . -C 2\n@read f 1-2\n', {}, ["expand"]);
     expect(r.code).toBe(0);
     expect(r.text).toBe('@grep "a b" . --context 2\n\n@read f 1-2\n');
-    expect(script("@bad\n", {}, ["expand"]).code).toBe(2);
+    expect((await script("@bad\n", {}, ["expand"])).code).toBe(2);
   });
 });
 
 // ───────────────────────────── Journal : log et undo ─────────────────────────────
 
 describe("journal", () => {
-  function twoRuns() {
+  async function twoRuns() {
     const dir = sb({ "a.txt": "one\n", "gone.txt": "bye\n", "run.sh": "#!/bin/sh\n" });
     fs.chmodSync(path.join(dir, "run.sh"), 0o755);
-    const first = call(dir, [], {
+    const first = await call(dir, [], {
       stdin: `${edit("a.txt", "one", "ONE")}${content("create", "new.txt", "n")}@delete gone.txt\n@move run.sh bin/run.sh\n`,
       id: "r1",
     });
-    const second = call(dir, [], { stdin: edit("a.txt", "ONE", "TWO"), id: "r2" });
+    const second = await call(dir, [], { stdin: edit("a.txt", "ONE", "TWO"), id: "r2" });
     return { dir, first, second };
   }
 
-  it("log liste les runs et détaille un run", () => {
-    const empty = run(["log"]);
+  it("log liste les runs et détaille un run", async () => {
+    const empty = await run(["log"]);
     expect(empty.text).toBe("Aucun run enregistré.\n");
-    const { dir } = twoRuns();
-    const list = call(dir, ["log"]).text;
+    const { dir } = await twoRuns();
+    const list = (await call(dir, ["log"])).text;
     expect(list).toContain("r1  2026-11-19T10:00:00.123Z  5 fichier(s)");
     expect(list).toContain("r2  2026-11-19T10:00:00.123Z  1 fichier(s)");
-    const detail = call(dir, ["log", "--run", "r1"]).text;
+    const detail = (await call(dir, ["log", "--run", "r1"])).text;
     expect(detail).toContain("=== script plat (r1) ===");
     expect(detail).toContain("@delete gone.txt");
     expect(detail).toContain("=== rapport ===");
     expect(detail).toContain("Annulable avec : fls undo");
-    expect(call(dir, ["log", "--run", "zzz"]).errText).toContain("run_not_found");
-    expect(call(dir, ["log", "--run", "../x"]).code).toBe(1);
+    expect((await call(dir, ["log", "--run", "zzz"])).errText).toContain("run_not_found");
+    expect((await call(dir, ["log", "--run", "../x"])).code).toBe(1);
   });
 
-  it("undo annule le dernier run non annulé, puis le précédent", () => {
-    const { dir } = twoRuns();
-    const u2 = call(dir, ["undo"]);
+  it("undo annule le dernier run non annulé, puis le précédent", async () => {
+    const { dir } = await twoRuns();
+    const u2 = await call(dir, ["undo"]);
     expect(u2.code).toBe(0);
     expect(u2.text).toContain("UNDO r2 (1 fichier(s) restauré(s))");
     expect(read(dir, "a.txt")).toBe("ONE\n");
-    expect(call(dir, ["log"]).text).toContain("[annulé]");
-    const u1 = call(dir, ["undo"]);
+    expect((await call(dir, ["log"])).text).toContain("[annulé]");
+    const u1 = await call(dir, ["undo"]);
     expect(u1.text).toContain("UNDO r1 (5 fichier(s) restauré(s))");
     expect(read(dir, "a.txt")).toBe("one\n");
     expect(exists(dir, "new.txt")).toBe(false);
     expect(read(dir, "gone.txt")).toBe("bye\n");
     expect(exists(dir, "bin/run.sh")).toBe(false);
     expect(fs.statSync(path.join(dir, "run.sh")).mode & 0o777).toBe(0o755);
-    const none = call(dir, ["undo"]);
+    const none = await call(dir, ["undo"]);
     expect(none.code).toBe(1);
     expect(none.errText).toContain("nothing_to_undo");
   });
 
-  it("undo ciblé, déjà annulé, inconnu", () => {
-    const { dir } = twoRuns();
-    expect(call(dir, ["undo", "--run", "r1"]).code).toBe(1);
-    expect(call(dir, ["undo", "--run", "r2"]).code).toBe(0);
-    const again = call(dir, ["undo", "--run", "r2"]);
+  it("undo ciblé, déjà annulé, inconnu", async () => {
+    const { dir } = await twoRuns();
+    expect((await call(dir, ["undo", "--run", "r1"])).code).toBe(1);
+    expect((await call(dir, ["undo", "--run", "r2"])).code).toBe(0);
+    const again = await call(dir, ["undo", "--run", "r2"]);
     expect(again.code).toBe(1);
     expect(again.errText).toContain("already_undone");
-    expect(call(dir, ["undo", "--run", "nope"]).errText).toContain("run_not_found");
+    expect((await call(dir, ["undo", "--run", "nope"])).errText).toContain("run_not_found");
   });
 
-  it("undo refuse en cas de conflit, sauf --force", () => {
-    const { dir } = twoRuns();
+  it("undo refuse en cas de conflit, sauf --force", async () => {
+    const { dir } = await twoRuns();
     fs.writeFileSync(path.join(dir, "a.txt"), "modifié à la main\n");
-    const refused = call(dir, ["undo", "--run", "r2"]);
+    const refused = await call(dir, ["undo", "--run", "r2"]);
     expect(refused.code).toBe(1);
     expect(refused.errText).toContain("conflict");
     expect(refused.errText).toContain("a.txt");
     expect(read(dir, "a.txt")).toBe("modifié à la main\n");
-    expect(call(dir, ["undo", "--run", "r2", "--force"]).code).toBe(0);
+    expect((await call(dir, ["undo", "--run", "r2", "--force"])).code).toBe(0);
     expect(read(dir, "a.txt")).toBe("ONE\n");
   });
 });
@@ -791,48 +791,48 @@ describe("journal", () => {
 // ───────────────────────────── Aide, spec, init ─────────────────────────────
 
 describe("aide", () => {
-  it("--help, -h, --version", () => {
-    expect(run(["--help"]).text).toContain("fls <chemin...>");
-    expect(run(["-h"]).text).toContain("Sous-commandes".length ? "Usage :" : "");
-    expect(run(["--version"]).text).toBe("fls 1.0.0\n");
+  it("--help, -h, --version", async () => {
+    expect((await run(["--help"])).text).toContain("fls <chemin...>");
+    expect((await run(["-h"])).text).toContain("Sous-commandes".length ? "Usage :" : "");
+    expect((await run(["--version"])).text).toBe("fls 1.0.0\n");
   });
 
-  it("spec contient toutes les directives et tous les codes d'erreur", () => {
-    const spec = run(["spec"]).text;
+  it("spec contient toutes les directives et tous les codes d'erreur", async () => {
+    const spec = (await run(["spec"])).text;
     for (const d of fls.DIRECTIVES) expect(spec).toContain(`@${d.name} —`);
     for (const [code] of fls.ERROR_CODES) expect(spec).toContain(code);
     expect(spec).toContain("# Référence de la syntaxe fls (v1)");
   });
 
-  it("chaque exemple de directive est un script valide", () => {
+  it("chaque exemple de directive est un script valide", async () => {
     for (const d of fls.DIRECTIVES) {
       for (const example of d.examples) expect(() => fls.parseScript(example)).not.toThrow();
       expect(fls.helpText(d)).toContain(d.usage);
     }
   });
 
-  it("help", () => {
-    expect(run(["help"]).text).toContain("@tree, @read, @grep");
-    expect(run(["help", "@read"]).text).toContain("Usage : @read <chemin>");
-    const unknown = run(["help", "nope"]);
+  it("help", async () => {
+    expect((await run(["help"])).text).toContain("@tree, @read, @grep");
+    expect((await run(["help", "@read"])).text).toContain("Usage : @read <chemin>");
+    const unknown = await run(["help", "nope"]);
     expect(unknown.code).toBe(2);
     expect(unknown.errText).toContain("unknown_directive");
   });
 
-  it("init est idempotent", () => {
+  it("init est idempotent", async () => {
     const dir = sb({});
-    const first = call(dir, ["init"]);
+    const first = await call(dir, ["init"]);
     expect(first.text).toContain(".flsignore (créé)");
     expect(first.text).toContain(".gitignore (mis à jour)");
     expect(read(dir, ".gitignore")).toBe(".fls/\n");
-    const second = call(dir, ["init"]);
+    const second = await call(dir, ["init"]);
     expect(second.text).toContain(".flsignore (déjà présent)");
     expect(second.text).toContain(".gitignore (déjà à jour)");
     const noNewline = sb({ ".gitignore": "node_modules" });
-    call(noNewline, ["init"]);
+    await call(noNewline, ["init"]);
     expect(read(noNewline, ".gitignore")).toBe("node_modules\n.fls/\n");
     const withNewline = sb({ ".gitignore": "node_modules\n" });
-    call(withNewline, ["init"]);
+    await call(withNewline, ["init"]);
     expect(read(withNewline, ".gitignore")).toBe("node_modules\n.fls/\n");
   });
 });
@@ -840,7 +840,7 @@ describe("aide", () => {
 // ───────────────────────────── Ligne de commande ─────────────────────────────
 
 describe("parseArgs et main", () => {
-  it("parseArgs", () => {
+  it("parseArgs", async () => {
     const a = fls.parseArgs(["a", "--dry-run", "-h", "--ignore", "x", "--ignore", "y", "--file", "f", "b"]);
     expect(a.positional).toEqual(["a", "b"]);
     expect([...a.flags].sort()).toEqual(["dry-run", "help"]);
@@ -851,23 +851,23 @@ describe("parseArgs et main", () => {
     expect(() => fls.parseArgs(["--file"])).toThrow(/attend une valeur/);
   });
 
-  it("codes de sortie et messages d'erreur", () => {
-    const syntax = script("???\n");
+  it("codes de sortie et messages d'erreur", async () => {
+    const syntax = await script("???\n");
     expect(syntax.code).toBe(2);
     expect(syntax.errText).toContain("syntax_error : ligne 1");
-    expect(run(["--nope"]).code).toBe(2);
-    const missing = run(["--file", "absent.fls"]);
+    expect((await run(["--nope"])).code).toBe(2);
+    const missing = await run(["--file", "absent.fls"]);
     expect(missing.code).toBe(1);
     expect(missing.errText).toContain("ENOENT");
     const plain = fake(sb({}), { stdin: "@note x\n" });
     plain.io.readStdin = () => {
       throw new TypeError("boom");
     };
-    expect(fls.main([], plain.io)).toBe(1);
+    expect(await fls.main([], plain.io)).toBe(1);
     expect(plain.err.join("")).toBe("fls : boom\n");
   });
 
-  it("presse-papiers indisponible", () => {
+  it("presse-papiers indisponible", async () => {
     const f = fake(sb({}), { stdin: "@note x\n" });
     f.io.clipboard = {
       read: () => {
@@ -877,16 +877,16 @@ describe("parseArgs et main", () => {
         throw new fls.FlsError("clipboard_unavailable", "non");
       },
     };
-    expect(fls.main(["--clip"], f.io)).toBe(1);
+    expect(await fls.main(["--clip"], f.io)).toBe(1);
     expect(f.err.join("")).toContain("clipboard_unavailable");
-    expect(fls.main(["--clip-out"], f.io)).toBe(1);
+    expect(await fls.main(["--clip-out"], f.io)).toBe(1);
   });
 });
 
 // ───────────────────────────── Presse-papiers, E/S réelles, point d'entrée ─────────────────────────────
 
 describe("presse-papiers", () => {
-  it("createClipboard essaie chaque outil dans l'ordre", () => {
+  it("createClipboard essaie chaque outil dans l'ordre", async () => {
     const calls: string[] = [];
     const runner: fls.Runner = {
       capture: (cmd) => {
@@ -905,13 +905,13 @@ describe("presse-papiers", () => {
     expect(calls.slice(3)).toEqual(["feed:wl-copy", "feed:xclip", "feed:xsel", "feed:pbcopy"]);
   });
 
-  it("createClipboard échoue proprement sans outil", () => {
+  it("createClipboard échoue proprement sans outil", async () => {
     const clip = fls.createClipboard({ capture: () => null, feed: () => false });
     expect(() => clip.read()).toThrow(/presse-papiers/);
     expect(() => clip.write("x")).toThrow(/presse-papiers/);
   });
 
-  it("realRunner exécute de vrais processus", () => {
+  it("realRunner exécute de vrais processus", async () => {
     expect(fls.realRunner.capture(process.execPath, ["-e", "process.stdout.write('hi')"])).toBe("hi");
     expect(fls.realRunner.capture(process.execPath, ["-e", "process.exit(3)"])).toBeNull();
     expect(fls.realRunner.capture("fls-commande-inexistante", [])).toBeNull();
@@ -922,16 +922,19 @@ describe("presse-papiers", () => {
 });
 
 describe("E/S réelles et point d'entrée", () => {
-  it("makeId", () => {
+  it("makeId", async () => {
     expect(fls.makeId(new Date("2026-11-19T10:00:00.123Z"))).toMatch(/^20261119-100000123-[0-9a-f]{4}$/);
   });
 
-  it("createRealIo", () => {
+  it("createRealIo", async () => {
     const dir = sb({ "in.txt": "entrée" });
     const fd = fs.openSync(path.join(dir, "in.txt"), "r");
     const io = fls.createRealIo(fd);
     expect(io.readStdin()).toBe("entrée");
     expect(io.stdinIsTTY).toBe(false);
+    expect(typeof io.stdoutIsTTY).toBe("boolean");
+    expect(typeof io.stderrIsTTY).toBe("boolean");
+    expect(io.env).toBe(process.env);
     expect(io.cwd).toBe(process.cwd());
     expect(io.now()).toBeInstanceOf(Date);
     expect(io.newId(new Date())).toMatch(/^\d{8}-\d{9}-[0-9a-f]{4}$/);
@@ -945,7 +948,7 @@ describe("E/S réelles et point d'entrée", () => {
     fs.closeSync(fd);
   });
 
-  it("isEntry, setExitCode, startReal, bootstrap", () => {
+  it("isEntry, setExitCode, startReal, bootstrap", async () => {
     const self = fileURLToPath(import.meta.url);
     expect(fls.isEntry(undefined, "file:///x")).toBe(false);
     expect(fls.isEntry(self, pathToFileURL(self).href)).toBe(true);
@@ -955,7 +958,7 @@ describe("E/S réelles et point d'entrée", () => {
     expect(process.exitCode).toBe(0);
     process.exitCode = before;
     const set = vi.fn();
-    fls.startReal(["--version"], fake(sb({})).io, set);
+    await fls.startReal(["--version"], fake(sb({})).io, set);
     expect(set).toHaveBeenCalledWith(0);
     const start = vi.fn();
     fls.bootstrap(false, start);
@@ -964,7 +967,7 @@ describe("E/S réelles et point d'entrée", () => {
     expect(start).toHaveBeenCalledOnce();
   });
 
-  it("isEntry : chemin absent (catch) avec href identique ou différent", () => {
+  it("isEntry : chemin absent (catch) avec href identique ou différent", async () => {
     const absent = path.join(os.tmpdir(), `fls-absent-${process.pid}`);
     expect(fls.isEntry(absent, pathToFileURL(absent).href)).toBe(true);
     expect(fls.isEntry(absent, pathToFileURL(path.join(os.tmpdir(), "fls-autre")).href)).toBe(false);

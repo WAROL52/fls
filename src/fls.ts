@@ -22,6 +22,7 @@ import { DIRECTIVES, SPEC_BY_NAME } from "./directive/index.ts";
 import { ERROR_CODES, FlsError, syntaxError, USAGE_CODES } from "./errors.ts";
 import { loadIgnore } from "./paths.ts";
 import { blockLines, quote, splitLines, tokenize } from "./text.ts";
+import { colorizeQuickTree, colorizeReportText, resolveTargets, truncate as safeAnsiTruncate } from "./color.ts";
 import { renderTree, treeRel } from "./tree.ts";
 import type {
   Args,
@@ -170,23 +171,26 @@ export const serialize = (ops: Op[]): string => ops.map((o) => `${serializeOp(o)
 
 // ───────────────────────────── Exécution et rapport ─────────────────────────────
 
-export function execute(ops: Op[], ctx: Ctx): Result[] {
+export async function execute(ops: Op[], ctx: Ctx): Promise<Result[]> {
   let blocked = false;
-  return ops.map((op) => {
+  const out: Result[] = [];
+  for (const op of ops) {
     const spec = SPEC_BY_NAME.get(op.name) as Spec;
     const kind = op.name.toUpperCase();
     const title = op.args.map(quote).join(" ");
     if (blocked && spec.writes) {
-      return { status: "SKIP", kind, title, body: "    ignoré : une écriture précédente a échoué", code: "skipped" };
+      out.push({ status: "SKIP", kind, title, body: "    ignoré : une écriture précédente a échoué", code: "skipped" });
+      continue;
     }
     try {
-      const done = spec.run(ctx, op);
-      return { status: "OK", kind, title: done.title, body: done.body, code: "" };
+      const done = await spec.run(ctx, op);
+      out.push({ status: "OK", kind, title: done.title, body: done.body, code: "" });
     } catch (e) {
       if (spec.writes) blocked = true;
-      return { status: "FAIL", kind, title, body: `    ${(e as Error).message}`, code: String((e as FlsError).code) };
+      out.push({ status: "FAIL", kind, title, body: `    ${(e as Error).message}`, code: String((e as FlsError).code) });
     }
-  });
+  }
+  return out;
 }
 
 export function renderResult(n: number, r: Result): string {
@@ -210,10 +214,10 @@ function writeJournal(io: Io, ws: Workspace, id: string, now: Date, pending: Pen
   fs.writeFileSync(path.join(dir, "report.txt"), text);
 }
 
-export function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean): Report {
+export async function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean): Promise<Report> {
   const ws = new Workspace(io.cwd, numberArg(args, "max-size", DEFAULT_MAX_SIZE));
   const out = args.values.get("output");
-  const results = execute(ops, { ws, ignore: loadIgnore(ws, args.ignore), output: out === undefined ? null : path.resolve(io.cwd, out) });
+  const results = await execute(ops, { ws, ignore: loadIgnore(ws, args.ignore), output: out === undefined ? null : path.resolve(io.cwd, out) });
   const pending = ws.pending();
   const paths = pending.map((p) => p.rel);
   const now = io.now();
@@ -258,7 +262,7 @@ function restoreEntry(ws: Workspace, backupDir: string, f: JournalEntry): void {
   fs.chmodSync(abs, f.mode);
 }
 
-function cmdUndo(args: Args, io: Io): Report {
+async function cmdUndo(args: Args, io: Io): Promise<Report> {
   const id = args.values.get("run") ?? latestRun(io.cwd);
   const meta = readMeta(io.cwd, id);
   if (meta.undone) throw new FlsError("already_undone", `le run ${id} est déjà annulé`);
@@ -288,7 +292,7 @@ function cmdUndo(args: Args, io: Io): Report {
   return { text: renderReport(`fls ${VERSION} | undo | ${io.cwd} | ${now.toISOString()}`, [result], footer), code: 0 };
 }
 
-function cmdLog(args: Args, io: Io): Report {
+async function cmdLog(args: Args, io: Io): Promise<Report> {
   const id = args.values.get("run");
   if (id === undefined) {
     const lines = listRuns(io.cwd).map((r) => {
@@ -306,6 +310,9 @@ function cmdLog(args: Args, io: Io): Report {
 
 const GLOBAL_DOCS: string[] = [
   "--tree                  (lecture rapide ou script) sortie brute façon treecat",
+  "--color <mode>          auto|always|never (défaut auto)",
+  "--colored               alias de --color=always",
+  "--no-color              alias de --color=never",
   "--dry-run               simule sans rien écrire",
   "--file <chemin>         lit le script dans un fichier",
   "--clip                  lit le script dans le presse-papiers ET copie le rapport",
@@ -375,13 +382,14 @@ const SPEC_INTRO = [
 ].join("\n");
 
 export function buildSpec(): string {
+  const globals = ["## Options globales", ...GLOBAL_DOCS.map((d) => `  ${d}`)].join("\n");
   const errors = ["## Codes d'erreur", ...ERROR_CODES.map(([c, d]) => `  ${c.padEnd(22)} ${d}`)].join("\n");
-  return `${[SPEC_INTRO, "## Directives", ...DIRECTIVES.map(helpText), errors].join("\n\n")}\n`;
+  return `${[SPEC_INTRO, globals, "## Directives", ...DIRECTIVES.map(helpText), errors].join("\n\n")}\n`;
 }
 
-const cmdSpec = (): Report => ({ text: buildSpec(), code: 0 });
+const cmdSpec = async (): Promise<Report> => ({ text: buildSpec(), code: 0 });
 
-function cmdHelp(args: Args): Report {
+async function cmdHelp(args: Args): Promise<Report> {
   const name = (args.positional[0] ?? "").replace(/^@/, "");
   if (name === "") return { text: `Directives : ${DIRECTIVES.map((d) => `@${d.name}`).join(", ")}\nDétail : fls help <directive>\n`, code: 0 };
   const spec = SPEC_BY_NAME.get(name);
@@ -399,7 +407,7 @@ const FLSIGNORE_TEMPLATE = [
   "",
 ].join("\n");
 
-function cmdInit(_args: Args, io: Io): Report {
+async function cmdInit(_args: Args, io: Io): Promise<Report> {
   const ignoreFile = path.join(io.cwd, ".flsignore");
   const created = !fs.existsSync(ignoreFile);
   if (created) fs.writeFileSync(ignoreFile, FLSIGNORE_TEMPLATE);
@@ -454,6 +462,9 @@ export function createClipboard(runner: Runner): Clipboard {
 
 const GLOBAL: Record<string, "flag" | "value" | "list"> = {
   tree: "flag",
+  color: "value",
+  colored: "flag",
+  "no-color": "flag",
   "dry-run": "flag",
   clip: "flag",
   "clip-in": "flag",
@@ -475,21 +486,25 @@ export function parseArgs(argv: string[]): Args {
   const args: Args = { positional: [], flags: new Set(), values: new Map(), ignore: [] };
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
-    const name = Object.hasOwn(SHORT, tok) ? SHORT[tok] : tok.startsWith("--") ? tok.slice(2) : null;
-    if (name === null) {
+    const rawName = Object.hasOwn(SHORT, tok) ? SHORT[tok] : tok.startsWith("--") ? tok.slice(2) : null;
+    if (rawName === null) {
       args.positional.push(tok);
       continue;
     }
+    const eq = rawName.indexOf("=");
+    const name = eq === -1 ? rawName : rawName.slice(0, eq);
+    const inline = eq === -1 ? undefined : rawName.slice(eq + 1);
     const kind = Object.hasOwn(GLOBAL, name) ? GLOBAL[name] : undefined;
     if (kind === undefined) throw new FlsError("usage_error", `option inconnue : ${tok}`);
     if (kind === "flag") {
+      if (inline !== undefined) throw new FlsError("usage_error", `--${name} n'attend pas de valeur`);
       args.flags.add(name);
       continue;
     }
-    i += 1;
-    if (i >= argv.length) throw new FlsError("usage_error", `--${name} attend une valeur`);
-    if (kind === "list") args.ignore.push(argv[i]);
-    else args.values.set(name, argv[i]);
+    const val = inline ?? argv[++i];
+    if (val === undefined) throw new FlsError("usage_error", `--${name} attend une valeur`);
+    if (kind === "list") args.ignore.push(val);
+    else args.values.set(name, val);
   }
   return args;
 }
@@ -513,12 +528,12 @@ function scriptText(args: Args, io: Io): string {
 const hasScriptSource = (args: Args, io: Io): boolean =>
   args.values.has("file") || args.flags.has("clip") || args.flags.has("clip-in") || !io.stdinIsTTY;
 
-function cmdRun(args: Args, io: Io): Report {
+async function cmdRun(args: Args, io: Io): Promise<Report> {
   const ops = parseScript(scriptText(args, io));
   if (args.flags.has("tree")) for (const op of ops) if (op.name === "read") op.opts["tree"] = true;
   return execAndReport(args, io, ops, args.flags.has("dry-run"));
 }
-const cmdExpand = (args: Args, io: Io): Report => ({ text: serialize(parseScript(scriptText(args, io))), code: 0 });
+const cmdExpand = async (args: Args, io: Io): Promise<Report> => ({ text: serialize(parseScript(scriptText(args, io))), code: 0 });
 
 function quickPaths(args: Args, io: Io): string[] {
   const listFile = args.values.get("paths-from");
@@ -526,11 +541,11 @@ function quickPaths(args: Args, io: Io): string[] {
   return [...args.positional, ...extra];
 }
 
-function cmdQuickRead(args: Args, io: Io): Report {
+async function cmdQuickRead(args: Args, io: Io): Promise<Report> {
   return execAndReport(args, io, quickPaths(args, io).map((p) => makeOp("read", [p])), false);
 }
 
-function cmdQuickTree(args: Args, io: Io): Report {
+async function cmdQuickTree(args: Args, io: Io): Promise<Report> {
   if (args.ignore.length > 0) throw new FlsError("usage_error", "--ignore n'a pas de sens avec --tree (aucun ignore)");
   if (args.values.has("max-size")) throw new FlsError("usage_error", "--max-size n'a pas de sens avec --tree (aucune limite de taille)");
   const listed = args.values.has("paths-from");
@@ -540,32 +555,48 @@ function cmdQuickTree(args: Args, io: Io): Report {
   const output = outputRaw === undefined ? null : path.resolve(io.cwd, outputRaw);
   if (output !== null) fs.writeFileSync(output, "");
   const ws = new Workspace(io.cwd, DEFAULT_MAX_SIZE);
-  const parts: Buffer[] = [];
+  const rendered: Array<{ p: string; label: string; raw: Buffer } | null> = [];
   let code = 0;
-  paths.forEach((p, i) => {
-    if (i > 0) parts.push(Buffer.from("\n"));
+  for (const p of paths) {
     const label = p === "" ? "." : p;
     try {
-      parts.push(renderTree(ws, label, treeRel(p), output));
+      rendered.push({ p, label, raw: renderTree(ws, label, treeRel(p), output) });
     } catch (e) {
       code = 1;
-      io.err(`fls : ${[(e as FlsError).code, (e as Error).message].filter(Boolean).join(" : ")}\n`);
+      const msg = `fls : ${[(e as FlsError).code, (e as Error).message].filter(Boolean).join(" : ")}`;
+      io.err(`${msg}\n`);
+      rendered.push(null);
     }
-  });
-  const raw = Buffer.concat(parts);
-  return { text: raw.toString("utf8"), raw, code };
+  }
+  const plain = Buffer.concat(rendered.map((r, i) => (i > 0 ? Buffer.concat([Buffer.from("\n"), r?.raw ?? Buffer.alloc(0)]) : (r?.raw ?? Buffer.alloc(0))))).toString("utf8");
+  const targets = resolveTargets(args, io);
+  const wantColor = targets.stdout || targets.file || targets.clip;
+  if (!wantColor) return { text: plain, raw: Buffer.concat(rendered.map((r, i) => (i > 0 ? Buffer.concat([Buffer.from("\n"), r?.raw ?? Buffer.alloc(0)]) : (r?.raw ?? Buffer.alloc(0))))), code };
+  const coloredRoots: string[] = [];
+  for (const r of rendered) {
+    if (r === null) { coloredRoots.push(""); continue; }
+    const chunk = r.raw.toString("utf8");
+    /* v8 ignore start */
+    try {
+      coloredRoots.push(await colorizeQuickTree(chunk, ws, treeRel(r.p), r.label, targets));
+    } catch {
+      coloredRoots.push(chunk);
+    }
+    /* v8 ignore stop */
+  }
+  return { text: coloredRoots.join("\n"), preColored: true, code };
 }
 
-const SUBCOMMANDS: Record<string, (args: Args, io: Io) => Report> = {
+const SUBCOMMANDS: Record<string, (args: Args, io: Io) => Promise<Report>> = {
   expand: cmdExpand,
   undo: cmdUndo,
   log: cmdLog,
-  spec: cmdSpec,
-  help: cmdHelp,
+  spec: cmdSpec as (args: Args, io: Io) => Promise<Report>,
+  help: cmdHelp as (args: Args, io: Io) => Promise<Report>,
   init: cmdInit,
 };
 
-export function route(args: Args, io: Io): Report {
+export async function route(args: Args, io: Io): Promise<Report> {
   if (args.flags.has("help")) return { text: usage(), code: 0 };
   if (args.flags.has("version")) return { text: `fls ${VERSION}\n`, code: 0 };
   const [first, ...rest] = args.positional;
@@ -579,26 +610,67 @@ export function route(args: Args, io: Io): Report {
   return cmdRun(args, io);
 }
 
-export function emit(args: Args, io: Io, report: Report): void {
-  const limit = numberArg(args, "max-output-chars", report.raw === undefined ? DEFAULT_MAX_OUTPUT : Infinity);
-  const truncated = report.text.length > limit;
-  const shown: string | Buffer = truncated
-    ? `${report.text.slice(0, limit)}\n[rapport tronqué : ${report.text.length - limit} caractères omis ; relance avec --max-output-chars]\n`
-    : (report.raw ?? report.text);
-  const output = args.values.get("output");
-  if (output !== undefined) fs.writeFileSync(path.resolve(io.cwd, output), shown);
-  else io.out(shown);
-  if (args.flags.has("clip") || args.flags.has("clip-out")) io.clipboard.write(typeof shown === "string" ? shown : shown.toString("utf8"));
+function isExpand(args: Args): boolean {
+  return args.positional[0] === "expand";
 }
 
-export function main(argv: string[], io: Io): number {
+function withTruncation(text: string, limit: number, color: boolean): string {
+  if (text.length <= limit) return text;
+  if (!color) return `${text.slice(0, limit)}\n[rapport tronqué : ${text.length - limit} caractères omis ; relance avec --max-output-chars]\n`;
+  const cut = safeAnsiTruncate(text, limit);
+  return `${cut.text}\n[rapport tronqué : ${text.length - cut.text.length} caractères omis ; relance avec --max-output-chars]\n`;
+}
+
+export async function emit(args: Args, io: Io, report: Report): Promise<void> {
+  const targets = resolveTargets(args, io);
+  const limit = numberArg(args, "max-output-chars", report.raw === undefined ? DEFAULT_MAX_OUTPUT : Infinity);
+  const plainBase = report.text;
+  const expand = isExpand(args);
+  const preColored = report.preColored === true;
+  const stdoutColored = !expand && targets.stdout && report.raw === undefined && !preColored;
+  const fileColored = !expand && targets.file && report.raw === undefined && !preColored;
+  const clipColored = !expand && targets.clip && report.raw === undefined && !preColored;
+
+  const coloredBase = preColored ? plainBase : ((stdoutColored || fileColored || clipColored) ? await colorizeReportText(plainBase, targets) : null);
+
+  const useColoredStdout = preColored ? targets.stdout : stdoutColored;
+  const useColoredFile = preColored ? targets.file : fileColored;
+  const useColoredClip = preColored ? targets.clip : clipColored;
+
+  const outShown: string | Buffer = useColoredStdout
+    ? withTruncation(coloredBase as string, limit, true)
+    : (plainBase.length > limit
+      ? withTruncation(plainBase, limit, false)
+      : (report.raw ?? plainBase));
+  const output = args.values.get("output");
+  if (output !== undefined) {
+    const fileShown = useColoredFile ? withTruncation(coloredBase as string, limit, true) : (plainBase.length > limit ? withTruncation(plainBase, limit, false) : plainBase);
+    fs.writeFileSync(path.resolve(io.cwd, output), fileShown);
+  } else {
+    io.out(outShown);
+  }
+  if (args.flags.has("clip") || args.flags.has("clip-out")) {
+    const clipShown = useColoredClip ? withTruncation(coloredBase as string, limit, true) : (plainBase.length > limit ? withTruncation(plainBase, limit, false) : plainBase);
+    io.clipboard.write(clipShown);
+  }
+}
+
+export async function main(argv: string[], io: Io): Promise<number> {
   try {
     const args = parseArgs(argv);
-    const report = route(args, io);
-    emit(args, io, report);
+    const report = await route(args, io);
+    await emit(args, io, report);
     return report.code;
   } catch (e) {
-    io.err(`fls : ${[(e as FlsError).code, (e as Error).message].filter(Boolean).join(" : ")}\n`);
+    let msg = `fls : ${[(e as FlsError).code, (e as Error).message].filter(Boolean).join(" : ")}`;
+    try {
+      const args = parseArgs(argv);
+      const t = resolveTargets(args, io);
+      if (t.stderr) msg = (await colorizeReportText(msg, t));
+    } catch {
+      // ignore color failure on error path
+    }
+    io.err(`${msg}\n`);
     return USAGE_CODES.has(String((e as FlsError).code)) ? 2 : 1;
   }
 }
@@ -614,6 +686,9 @@ export function createRealIo(stdinFd: number): Io {
   return {
     cwd: process.cwd(),
     stdinIsTTY: isatty(stdinFd),
+    stdoutIsTTY: isatty(1),
+    stderrIsTTY: isatty(2),
+    env: process.env,
     readStdin: () => fs.readFileSync(stdinFd, "utf8"),
     out: (text) => {
       process.stdout.write(text);
@@ -642,8 +717,8 @@ export function isEntry(argv1: string | undefined, metaUrl: string): boolean {
 export function setExitCode(code: number): void {
   process.exitCode = code;
 }
-export function startReal(argv: string[], io: Io, setExit: (code: number) => void): void {
-  setExit(main(argv, io));
+export async function startReal(argv: string[], io: Io, setExit: (code: number) => void): Promise<void> {
+  setExit(await main(argv, io));
 }
 export function bootstrap(isMain: boolean, start: () => void): void {
   if (isMain) start();

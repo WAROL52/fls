@@ -30,6 +30,8 @@ export interface Report {
   text: string;
   /** Sortie brute (mode tree) : écrite telle quelle si elle n'est pas tronquée. */
   raw?: Buffer;
+  /** Texte déjà coloré (ANSI) : emit ne recolorise pas. */
+  preColored?: boolean;
   code: number;
 }
 
@@ -55,6 +57,9 @@ export interface Runner {
 export interface Io {
   cwd: string;
   stdinIsTTY: boolean;
+  stdoutIsTTY?: boolean;
+  stderrIsTTY?: boolean;
+  env?: Record<string, string | undefined>;
   readStdin(): string;
   out(text: string | Buffer): void;
   err(text: string): void;
@@ -81,7 +86,7 @@ export interface Spec {
   writes: boolean;
   optionDocs: string[];
   examples: string[];
-  run: (ctx: Ctx, op: Op) => { title: string; body: string };
+  run: (ctx: Ctx, op: Op) => { title: string; body: string } | Promise<{ title: string; body: string }>;
 }
 
 export interface Entry {
