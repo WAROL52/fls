@@ -34,9 +34,10 @@ const wrap = (open: string, s: string): string => (s === "" ? "" : `${open}${s}$
 
 function makeBg(open: string): Bg {
 	const wrapBg = (s: string): string => {
-		if (s === "" || open === "") return s;
+		if (open === "") return s;
 		// Réapplique le fond après chaque reset complet pour ne pas perdre le bg.
 		// EL (\x1b[K) remplit jusqu'au bord droit du terminal avec le fond actif.
+		if (s === "") return `${open}${ESC}K${RESET}`;
 		const body = s.replaceAll(RESET, `${RESET}${open}`);
 		return `${open}${body}${ESC}K${RESET}`;
 	};
