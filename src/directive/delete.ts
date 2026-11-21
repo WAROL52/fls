@@ -1,11 +1,11 @@
 import { normalizeRel } from "../paths.ts";
-import type { Ctx, Op, Spec } from "../types.ts";
+import type { Ctx, Done, Op, Spec } from "../types.ts";
 import { directive } from "./shared.ts";
 
-function runDelete(ctx: Ctx, op: Op): { title: string; body: string } {
+function runDelete(ctx: Ctx, op: Op): Done {
   const rel = normalizeRel(op.args[0]);
   ctx.ws.remove(rel);
-  return { title: rel, body: "" };
+  return { title: rel, body: [] };
 }
 
 export const del: Spec = directive({

@@ -6,5 +6,5 @@ export const note: Spec = directive({
   summary: "recopie un texte dans le rapport (pour annoter les étapes d'un script)",
   usage: '@note "<texte>"',
   examples: ['@note "étape 1 : ajout du champ role"'],
-  run: (_ctx, op) => ({ title: op.args[0], body: "" }),
+  run: (_ctx, op) => ({ title: op.args[0], body: [] }),
 });

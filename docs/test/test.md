@@ -20,6 +20,7 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 | Fichier | Contenu |
 |---|---|
 | `src/fls.test.ts` | parseur, directives (`@tree`, `@read`, `@grep`, `@note`, `@edit`, écritures, `@delete`, `@move`), exécution et politique d'échec, sources et sorties, journal / `undo` / `log`, aide, `parseArgs` et `main`, presse-papiers, E/S réelles et point d'entrée |
+| `src/report.test.ts` | le module Rapport par son interface : rendu brut (chaque segment, rapport complet), rendu stylé (fond, gouttière, repli, grep, diff, highlighter en erreur), copie versionnée de la Dernière sortie |
 | `src/color.test.ts` | palette ANSI, modes de couleur, fond limité aux contenus de fichier, tabulations, `--tree --colored` sans coupe par défaut, coloration du rapport, de l'arbre et des diffs |
 | `src/wrap.test.ts` | `wrapAnsi`, numéros de ligne et repli à la largeur du terminal (`@read`, `--tree`, `@grep`, `@edit`), absence de repli vers fichier / presse-papiers ; utilise la vraie coloration Shiki |
 | `src/last.test.ts` | `fls last` : réaffichage sans réexécution, réajustement de la largeur, mémorisation, erreurs (`no_last_output`, cache corrompu ou illisible), `cacheDirFor`, `terminalColumns` |
@@ -33,7 +34,7 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 - **Vrais dossiers temporaires.** Chaque test crée son arborescence dans un dossier temporaire (`sb({ "a.ts": "…" })`) et le supprime après coup. Liens symboliques, permissions et fichiers illisibles sont réels.
 - **Vrais sous-processus quand c'est le sujet.** Le presse-papiers, le binaire et la parité `treecat` passent par de vrais processus.
 - **Tables plutôt que chaînes de `if`.** Le code est organisé pour que chaque branche soit atteignable sans astuce de test.
-- **Le mock de Shiki.** `color.test.ts` remplace `highlightCode` par une fonction qui entoure chaque ligne de `<H>…</H>`. Cela rend les assertions sur le fond et les tabulations lisibles et indépendantes du thème. La vraie coloration est couverte dans `highlight.test.ts` et vérifiée à la main sur un fichier réel.
+- **Le highlighter est injecté, pas mocké.** Le rendu stylé reçoit un `Highlighter` (`Io.highlighter` en production, Shiki par défaut). Les tests passent un highlighter de test qui entoure chaque ligne de `<H>…</H>` : les assertions restent lisibles et indépendantes du thème. Les vraies couleurs du thème sont vérifiées dans `highlight.test.ts` et sur la vraie coloration dans `wrap.test.ts`.
 
 ## Écrire un test
 
@@ -71,6 +72,7 @@ Pour une correction de bug, ajouter un test qui échoue avant le correctif et pa
 ## Tester l'affichage et `fls last`
 
 - La largeur du terminal est injectée : `Io.columns` (`undefined` hors terminal). Un test choisit `columns: 40` et vérifie que chaque ligne visuelle, ANSI retirés, fait au plus `columns - 1` colonnes, que le fond commence et finit chaque ligne et que les morceaux recollés redonnent la ligne source.
+- Le Rapport se teste **par sa structure** (`ReportDoc` → `renderPlain` / `renderStyled`), pas en reparsant du texte ou de l'ANSI.
 - Le dossier de mémorisation est injecté : `Io.cacheDir`. `last.test.ts` construit une « session » (même dossier de travail et même cache d'une commande à l'autre) pour enchaîner une commande puis `fls last`.
 - Preuve de non-réexécution : modifier ou supprimer un fichier entre la commande et `fls last`, et constater que la sortie réaffichée est l'ancienne.
 

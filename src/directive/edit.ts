@@ -1,7 +1,7 @@
 import { FlsError } from "../errors.ts";
 import { normalizeRel } from "../paths.ts";
 import { blockLines, lineAt, splitLines } from "../text.ts";
-import type { Ctx, Op, Spec } from "../types.ts";
+import type { Ctx, Done, Op, Spec } from "../types.ts";
 import { directive } from "./shared.ts";
 
 const bigrams = (s: string): Set<string> => new Set(Array.from({ length: Math.max(s.length - 1, 0) }, (_, i) => s.slice(i, i + 2)));
@@ -32,14 +32,14 @@ function findAll(hay: string, needle: string): number[] {
   return found;
 }
 
-function runEdit(ctx: Ctx, op: Op): { title: string; body: string } {
+function runEdit(ctx: Ctx, op: Op): Done {
   const rel = normalizeRel(op.args[0]);
   const original = ctx.ws.text(rel);
   const eol = original.includes("\r\n") ? "\r\n" : "\n";
   let current = original;
   let added = 0;
   let removed = 0;
-  const diff = op.edits.flatMap((ed, n) => {
+  const hunks = op.edits.flatMap((ed, n) => {
     const search = ed.search.replaceAll("\n", eol);
     const found = findAll(current, search);
     if (found.length === 0) {
@@ -59,10 +59,10 @@ function runEdit(ctx: Ctx, op: Op): { title: string; body: string } {
     const come = blockLines(ed.replace);
     removed += gone.length;
     added += come.length;
-    return [`@@ bloc ${n + 1} (ligne ${line})`, ...gone.map((l) => `- ${l}`), ...come.map((l) => `+ ${l}`)];
+    return [{ block: n + 1, line, removed: gone, added: come }];
   });
   ctx.ws.write(rel, Buffer.from(current, "utf8"));
-  return { title: `${rel} (${op.edits.length} bloc(s), +${added} -${removed})`, body: diff.join("\n") };
+  return { title: `${rel} (${op.edits.length} bloc(s), +${added} -${removed})`, body: [{ kind: "diff", hunks }] };
 }
 
 export const edit: Spec = directive({

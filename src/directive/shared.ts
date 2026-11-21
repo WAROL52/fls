@@ -4,7 +4,7 @@
 import { FlsError } from "../errors.ts";
 import { normalizeRel } from "../paths.ts";
 import { joinRel, splitLines } from "../text.ts";
-import type { Ctx, Kind, Op, Spec } from "../types.ts";
+import type { Ctx, Done, Kind, Op, Spec } from "../types.ts";
 import type { Workspace } from "../workspace.ts";
 
 export function intOpt(op: Op, name: string, fallback: number): number {
@@ -59,13 +59,13 @@ const PUT_CHECKS: Record<string, (existed: boolean, rel: string) => void> = {
   write: () => undefined,
 };
 
-export function runPut(mode: string): (ctx: Ctx, op: Op) => { title: string; body: string } {
+export function runPut(mode: string): (ctx: Ctx, op: Op) => Done {
   return (ctx, op) => {
     const rel = normalizeRel(op.args[0]);
     const existed = ctx.ws.kind(rel) !== null;
     PUT_CHECKS[mode](existed, rel);
     ctx.ws.write(rel, Buffer.from(op.content, "utf8"));
-    return { title: `${rel} (${existed ? "remplacé" : "nouveau"}, ${splitLines(op.content).length} lignes)`, body: "" };
+    return { title: `${rel} (${existed ? "remplacé" : "nouveau"}, ${splitLines(op.content).length} lignes)`, body: [] };
   };
 }
 

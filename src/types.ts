@@ -1,5 +1,7 @@
 // Types partagés par tous les modules de fls.
 
+import type { Highlighter } from "./highlight.ts";
+import type { ReportDoc, Segment } from "./report/segments.ts";
 import type { Workspace } from "./workspace.ts";
 
 export type Kind = "file" | "dir" | "link";
@@ -18,26 +20,27 @@ export interface Op {
   content: string;
 }
 
-export interface Result {
-  status: "OK" | "FAIL" | "SKIP";
-  kind: string;
+/** Ce que renvoie une directive : le titre de son entrée et le corps (segments typés). */
+export interface Done {
   title: string;
-  body: string;
-  code: string;
+  body: Segment[];
 }
 
 /** Copie non colorée de la sortie, de quoi la réafficher (`fls last`) sans réexécuter. */
 export type Snapshot =
-  | { kind: "report"; text: string }
+  | { kind: "report"; doc: ReportDoc }
   | { kind: "tree"; roots: Array<{ p: string; label: string; raw: string } | null> };
 
 export interface Report {
+  /** Rendu brut (SPEC §8) : troncature, journal, --clip, sortie non colorée. */
   text: string;
+  /** Le Rapport en donnée (lectures rapides et scripts) : rendu stylé et Dernière sortie. */
+  doc?: ReportDoc;
   /** Mémorisée par `emit` pour `fls last` (absente : sortie non mémorisable). */
   snapshot?: Snapshot;
   /** Sortie brute (mode tree) : écrite telle quelle si elle n'est pas tronquée. */
   raw?: Buffer;
-  /** Texte déjà coloré (ANSI) : emit ne recolorise pas. */
+  /** Sortie `--tree` déjà colorée (ANSI) : emit ne la rend pas une seconde fois. */
   preColored?: boolean;
   code: number;
 }
@@ -77,6 +80,8 @@ export interface Io {
   cacheDir?: string;
   /** Largeur du terminal (stdout) quand c'est un terminal : sert à replier les lignes longues. */
   columns?: number;
+  /** Coloration syntaxique (Shiki par défaut) : injectable pour les tests. */
+  highlighter?: Highlighter;
 }
 
 export interface Args {
@@ -97,10 +102,11 @@ export interface Spec {
   writes: boolean;
   optionDocs: string[];
   examples: string[];
-  run: (ctx: Ctx, op: Op) => { title: string; body: string } | Promise<{ title: string; body: string }>;
+  run: (ctx: Ctx, op: Op) => Done | Promise<Done>;
 }
 
-export interface Entry {
+/** État d'un fichier dans la surcouche en mémoire du Workspace. */
+export interface FileState {
   data: Buffer | null;
   mode: number;
 }

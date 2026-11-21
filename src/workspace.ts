@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { FlsError } from "./errors.ts";
-import type { Entry, JournalEntry, Kind, Pending } from "./types.ts";
+import type { FileState, JournalEntry, Kind, Pending } from "./types.ts";
 
 const BINARY_SNIFF = 8000;
 const DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -25,7 +25,7 @@ const lstatSafe = (abs: string): fs.Stats | undefined => {
 export class Workspace {
   root: string;
   maxSize: number;
-  changes: Map<string, Entry> = new Map();
+  changes: Map<string, FileState> = new Map();
   private realRoot: string;
 
   constructor(root: string, maxSize: number) {
@@ -116,7 +116,7 @@ export class Workspace {
     const data = this.get(from);
     const mode = this.modeOf(from);
     this.write(to, data);
-    (this.changes.get(to) as Entry).mode = mode;
+    (this.changes.get(to) as FileState).mode = mode;
     this.remove(from);
   }
 

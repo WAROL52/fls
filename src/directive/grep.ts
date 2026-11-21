@@ -1,7 +1,8 @@
 import { FlsError } from "../errors.ts";
 import { normalizeRel } from "../paths.ts";
 import { range, splitLines } from "../text.ts";
-import type { Ctx, Op, Spec } from "../types.ts";
+import type { MatchRow } from "../report/segments.ts";
+import type { Ctx, Done, Op, Spec } from "../types.ts";
 import type { Workspace } from "../workspace.ts";
 import { collectFiles, directive, intOpt } from "./shared.ts";
 
@@ -23,13 +24,13 @@ function compileRegex(source: string, flags: string): RegExp {
   }
 }
 
-function runGrep(ctx: Ctx, op: Op): { title: string; body: string } {
+function runGrep(ctx: Ctx, op: Op): Done {
   const needle = op.args[0];
   const rel = normalizeRel(op.args[1] ?? ".");
   const re = compileRegex(op.opts["regex"] === true ? needle : escapeAll(needle), op.opts["ignore-case"] === true ? "i" : "");
   const context = intOpt(op, "context", 0);
   const isDir = ctx.ws.kind(rel) === "dir";
-  const out: string[] = [];
+  const rows: MatchRow[] = [];
   let hits = 0;
   let matchedFiles = 0;
   for (const f of isDir ? collectFiles(ctx, rel) : [rel]) {
@@ -43,13 +44,13 @@ function runGrep(ctx: Ctx, op: Op): { title: string; body: string } {
     const keep = new Set(found.flatMap((i) => range(Math.max(0, i - context), Math.min(lines.length - 1, i + context))));
     let prev = -2;
     for (const i of [...keep].sort((a, b) => a - b)) {
-      if (out.length > 0 && i !== prev + 1) out.push("--");
-      out.push(found.includes(i) ? `${f}:${i + 1}: ${lines[i]}` : `${f}-${i + 1}- ${lines[i]}`);
+      if (rows.length > 0 && i !== prev + 1) rows.push({ type: "sep" });
+      rows.push({ type: found.includes(i) ? "match" : "context", file: f, line: i + 1, text: lines[i] });
       prev = i;
     }
   }
   const where = rel === "" ? "." : rel;
-  return { title: `"${needle}" dans ${where} (${hits} correspondance(s) dans ${matchedFiles} fichier(s))`, body: out.join("\n") };
+  return { title: `"${needle}" dans ${where} (${hits} correspondance(s) dans ${matchedFiles} fichier(s))`, body: rows.length === 0 ? [] : [{ kind: "matches", pattern: needle, rows }] };
 }
 
 export const grep: Spec = directive({

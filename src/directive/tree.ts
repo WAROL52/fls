@@ -1,6 +1,7 @@
+import { textBody } from "../report/segments.ts";
 import { FlsError } from "../errors.ts";
 import { normalizeRel } from "../paths.ts";
-import type { Ctx, Op, Spec } from "../types.ts";
+import type { Ctx, Done, Op, Spec } from "../types.ts";
 import type { Workspace } from "../workspace.ts";
 import { directive, intOpt, treeLines } from "./shared.ts";
 
@@ -10,12 +11,12 @@ function requireDir(ws: Workspace, rel: string): void {
   if (k !== "dir") throw new FlsError("not_a_directory", `${rel} n'est pas un dossier`);
 }
 
-function runTree(ctx: Ctx, op: Op): { title: string; body: string } {
+function runTree(ctx: Ctx, op: Op): Done {
   const rel = normalizeRel(op.args[0] ?? ".");
   requireDir(ctx.ws, rel);
   const label = rel === "" ? "." : rel;
   const lines = treeLines(ctx, rel, intOpt(op, "depth", Infinity), op.opts["dirs-only"] === true, "");
-  return { title: label, body: [`${label}/`, ...lines].join("\n") };
+  return { title: label, body: textBody([`${label}/`, ...lines].join("\n")) };
 }
 
 export const tree: Spec = directive({

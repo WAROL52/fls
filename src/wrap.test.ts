@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { RESET, wrapAnsi } from "./ansi.ts";
-import { colorizeReportText, parseBg } from "./color.ts";
+import { parseBg } from "./color.ts";
 import { palette } from "./ansi.ts";
 import * as fls from "./fls.ts";
 
@@ -121,12 +121,6 @@ describe("numéros de ligne (sortie colorée)", () => {
     const r = await run({ "d/a.bin": Buffer.from([1, 0, 2]) }, ["--colored"], { stdin: "@read d\n" });
     expect(r.text).toContain("[omis : binary_file]");
     expect(rowsOf(r.text)).toHaveLength(0);
-  });
-
-  it("en-tête sans indication de lignes : numérotation à partir de 1", async () => {
-    const report = ["[1] OK    READ f.ts", "=== f.ts ===", "un", "deux", "=== fin ==="].join("\n");
-    const out = await colorizeReportText(report, { stdout: true, stderr: true, file: true, clip: true, level: 3 });
-    expect(rowsOf(out).map(strip)).toEqual(["1 │ un", "2 │ deux"]);
   });
 
   it("sans couleur : aucune numérotation (sortie brute inchangée)", async () => {

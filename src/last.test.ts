@@ -195,7 +195,8 @@ describe("fls last : erreurs et cas limites", () => {
   it("fichier mémorisé corrompu ou de forme inconnue : no_last_output", async () => {
     const s = session();
     fs.mkdirSync(s.cache, { recursive: true });
-    for (const bad of ["pas du json", "{}", '{"snapshot":{"kind":"autre"}}', '{"snapshot":null}']) {
+    const oldFormat = JSON.stringify({ version: "1.2.0", snapshot: { kind: "report", text: "[1] OK  NOTE x\n" } }); // copie texte de fls 1.2.0
+    for (const bad of ["pas du json", "{}", '{"snapshot":{"kind":"autre"}}', '{"snapshot":null}', oldFormat]) {
       fs.writeFileSync(s.lastFile, bad);
       const r = await s.run(["last"]);
       expect(r.code, bad).toBe(1);
@@ -232,8 +233,9 @@ describe("fls last : erreurs et cas limites", () => {
   it("loadLast / saveLast : aller-retour direct", () => {
     const s = session();
     const io = { cwd: s.cwd, cacheDir: s.cache, now: () => new Date(0) } as fls.Io;
-    fls.saveLast(io, { kind: "report", text: "t\n" });
-    expect(fls.loadLast(io)).toEqual({ kind: "report", text: "t\n" });
+    const doc = { header: "h", entries: [{ status: "OK" as const, kind: "NOTE", title: "t", code: "", body: [] }], footer: ["f"] };
+    fls.saveLast(io, { kind: "report", doc });
+    expect(fls.loadLast(io)).toEqual({ kind: "report", doc });
     expect(() => fls.loadLast({ cwd: s.cwd } as fls.Io)).toThrow(/aucune sortie mémorisée/);
   });
 });

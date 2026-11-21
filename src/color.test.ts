@@ -1,27 +1,20 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { applyLineBg, palette, safeTruncate } from "./ansi.ts";
-import { colorizeQuickTree, colorizeReportText, colorMode, expandTabs, resolveTargets } from "./color.ts";
-import * as highlight from "./highlight.ts";
+import { colorizeQuickTree, colorMode, resolveTargets } from "./color.ts";
+import type { Highlighter } from "./highlight.ts";
+import { expandTabs } from "./report/code-block.ts";
 import * as fls from "./fls.ts";
 import { Workspace } from "./workspace.ts";
 
-vi.mock("./highlight.ts", async (importOriginal) => {
-  const orig = await importOriginal<typeof import("./highlight.ts")>();
-  return {
-    ...orig,
-    highlightCode: vi.fn(async (code: string, _lang: string, _theme: string, level: number) =>
-      level === 0 ? code : code.split("\n").map((l) => `<H>${l}</H>`).join("\n"),
-    ),
-  };
-});
+/** Highlighter de test : entoure chaque ligne de <H>…</H> (assertions lisibles, indépendantes du thème). */
+const markHighlighter: Highlighter = async (code) => code.split("\n").map((l) => `<H>${l}</H>`);
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
-  vi.clearAllMocks();
 });
 
 function sb(files: Record<string, string | Buffer> = {}): string {
@@ -34,7 +27,7 @@ function sb(files: Record<string, string | Buffer> = {}): string {
   return dir;
 }
 
-function fake(cwd: string, o: { tty?: boolean; stdoutTTY?: boolean; stderrTTY?: boolean; env?: Record<string, string | undefined>; clipboard?: string; columns?: number; cacheDir?: string } = {}) {
+function fake(cwd: string, o: { tty?: boolean; stdoutTTY?: boolean; stderrTTY?: boolean; env?: Record<string, string | undefined>; clipboard?: string; columns?: number; cacheDir?: string; highlighter?: Highlighter } = {}) {
   const out: Array<string | Buffer> = [];
   const err: string[] = [];
   const clip = { text: o.clipboard ?? "" };
@@ -52,6 +45,7 @@ function fake(cwd: string, o: { tty?: boolean; stdoutTTY?: boolean; stderrTTY?: 
     newId: () => "r1",
     columns: o.columns,
     cacheDir: o.cacheDir,
+    highlighter: o.highlighter ?? markHighlighter,
   };
   return { io, out, err, clip };
 }
@@ -129,40 +123,11 @@ describe("color mode", () => {
 
 describe("fond (bg) limité aux contenus de fichier", () => {
   const BG = "\x1b[48;2;20;20;20m";
-  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
+  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const, highlighter: markHighlighter };
   const lineOf = (out: string, needle: string): string => out.split("\n").find((l) => l.includes(needle)) as string;
 
   it("ligne vide de fichier : le fond remplit jusqu'au bord", () => {
     expect(palette(3).bgCode.wrap("")).toBe(`${BG}\x1b[K\x1b[0m`);
-  });
-
-  it("rapport : fond sur le contenu, pas sur l'en-tête, le résumé, les notes ni les marqueurs", async () => {
-    const report = [
-      "fls 1.2.0 | run r1 | /x | 2026",
-      "",
-      "[1] OK    NOTE une note",
-      "",
-      "[2] OK    READ f.ts (1 lignes)",
-      "=== f.ts (1 lignes) ===",
-      "const x = 1",
-      "=== fin ===",
-      "",
-      "[3] OK    GREP \"x\" dans . (1 correspondance(s) dans 1 fichier(s))",
-      "f.ts:1: const x = 1",
-      "",
-      "Résumé : 2 OK, 0 FAIL, 0 SKIP",
-      "Modifiés : aucun",
-    ].join("\n");
-    const out = await colorizeReportText(report, targets);
-    for (const n of ["fls 1.2.0", "une note", "READ", "=== f.ts", "=== fin", "Résumé", "Modifiés", "GREP"]) expect(lineOf(out, n), n).not.toBeUndefined();
-    for (const n of ["fls 1.2.0", "une note", "READ", "=== f.ts", "=== fin", "Résumé", "Modifiés", "GREP"]) expect(lineOf(out, n)).not.toContain(BG);
-    expect(lineOf(out, "const")).toContain(BG);
-    expect(out.split("\n").find((l) => l.includes("const") && !l.includes("<H>"))).toContain(BG);
-  });
-
-  it("usage / texte libre : aucun fond", async () => {
-    const out = await colorizeReportText("Usage :\n  fls <chemin...>   lecture rapide\n\nOptions :\n  --tree  brut", targets);
-    expect(out).not.toContain(BG);
   });
 
   it("fls --tree : fond sur le contenu seulement, pas sur la racine ni les noms", async () => {
@@ -372,43 +337,6 @@ describe("fls --tree --colored : aucune coupe par défaut (dossiers suivants vis
   });
 });
 
-describe("colorizeReportText", () => {
-  it("colorise rapport, read, diff, grep, résumé", async () => {
-    const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
-    const report = [
-      "fls 1.2.0 | run r1 | /x | 2026",
-      "",
-      "[1] OK    READ f.ts (1 lignes)",
-      "=== f.ts (1 lignes) ===",
-      "const x = 1",
-      "=== fin ===",
-      "",
-      "[2] FAIL  EDIT f.ts : not_found",
-      "@@ bloc 1 (ligne 1)",
-      "- old",
-      "+ new",
-      "",
-      "[3] OK    GREP \"x\" dans . (1 correspondance(s) dans 1 fichier(s))",
-      "f.ts:1: const x = 1",
-      "--",
-      "f.ts-2- ctx",
-      "",
-      "Résumé : 2 OK, 1 FAIL, 0 SKIP",
-      "Modifiés : aucun",
-    ].join("\n");
-    const out = await colorizeReportText(report, targets);
-    expect(out).toContain("\x1b[");
-    expect(out).toContain("<H>const x = 1</H>");
-    expect(out).toContain("48;2;55;34;44m"); // del bg
-    expect(out).toContain("48;2;32;48;59m"); // add bg
-  });
-
-  it("niveau 0 ne modifie pas", async () => {
-    const t = { stdout: false, stderr: false, file: false, clip: false, level: 0 as const };
-    expect(await colorizeReportText("fls\n\nRésumé : 0 OK", t)).toBe("fls\n\nRésumé : 0 OK");
-  });
-});
-
 describe("fls --colored", () => {
   it("auto sur TTY stdout colore", async () => {
     const dir = sb({ "a.ts": "const a = 1\n" });
@@ -462,7 +390,7 @@ describe("fls --colored", () => {
 });
 
 describe("colorize intégration", () => {
-  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
+  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const, highlighter: markHighlighter };
 
   it("read avec line-numbers et dossier", async () => {
     const dir = sb({ "f.ts": "const a = 1\nconst b = 2\n", "d/x.ts": "export const x = 1\n" });
@@ -562,45 +490,8 @@ describe("colorize intégration", () => {
   });
 });
 
-describe("colorizeReportText branches", () => {
-  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
-  it("NOTE, unknown kind, bloc omis, grep sep", async () => {
-    const report = [
-      "fls 1.2.0 | run r1 | /x | 2026",
-      "",
-      "[1] OK    NOTE hello world",
-      "",
-      "[2] OK    CUSTOM thing",
-      "    body line",
-      "",
-      "[3] OK    READ d (dossier, 1 fichier(s))",
-      "d/",
-      "└── a.bin",
-      "=== a.bin ===",
-      "[omis : binary_file]",
-      "=== fin ===",
-      "",
-      "[4] OK    GREP \"x\" dans . (1 correspondance(s) dans 1 fichier(s))",
-      "--",
-      "f.ts:1: x",
-      "",
-      "Résumé : 4 OK, 0 FAIL, 0 SKIP",
-    ].join("\n");
-    const out = await colorizeReportText(report, targets);
-    expect(out).toContain("\x1b[");
-  });
-
-  it("highlightBlock catch fallback", async () => {
-    const mod = await import("./highlight.ts");
-    (mod.highlightCode as any).mockRejectedValueOnce(new Error("boom"));
-    const report = ["fls 1.2.0 | run r1 | /x | 2026", "", "[1] OK    READ f.ts (1 lignes)", "=== f.ts (1 lignes) ===", "x", "=== fin ===", "", "Résumé : 1 OK, 0 FAIL, 0 SKIP"].join("\n");
-    const out = await colorizeReportText(report, targets);
-    expect(out).toContain("x");
-  });
-});
-
 describe("coverage extras", () => {
-  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
+  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const, highlighter: markHighlighter };
 
   it("safeTruncate recule dans escape incomplète", () => {
     const s = "ab\x1b[31mcd";
@@ -613,38 +504,6 @@ describe("coverage extras", () => {
     expect(r2.text).toBe("ab\x1b[31m");
     // no escape nearby
     expect(safeTruncate("abcdef", 3).text).toBe("abc");
-  });
-
-  it("colorResultHead fallback et edit body context", async () => {
-    const report = [
-      "fls 1.2.0 | run r1 | /x | 2026",
-      "",
-      "[1] ",
-      "body",
-      "",
-      "[2] OK    EDIT f.ts (1 bloc(s), +0 -0)",
-      "@@ bloc 1",
-      " ctx",
-      "",
-      "Résumé : 1 OK, 0 FAIL, 0 SKIP",
-    ].join("\n");
-    const out = await colorizeReportText(report, targets);
-    expect(out).toContain("\x1b[");
-  });
-
-  it("grep met en évidence le match", async () => {
-    const report = [
-      "fls 1.2.0 | run r1 | /x | 2026",
-      "",
-      '[1] OK    GREP "foo" dans . (1 correspondance(s) dans 1 fichier(s))',
-      "a.ts:1: const foo = 1",
-      "--",
-      "a.ts-2- const bar = 2",
-      "",
-      "Résumé : 1 OK, 0 FAIL, 0 SKIP",
-    ].join("\n");
-    const out = await colorizeReportText(report, targets);
-    expect(out).toContain(";7m"); // match style (bold+inverse)
   });
 
   it("colorizeQuickTree root link/unreadable/output et contenu racine", async () => {
@@ -703,35 +562,6 @@ describe("coverage extras", () => {
     expect(fed).toBe(true);
   });
 
-  it("status SKIP/dim, numbered non-match, hl shorter, edit catch", async () => {
-    const mod = await import("./highlight.ts");
-    (mod.highlightCode as any).mockImplementationOnce(async (code: string) => `<H>${code.split("\n")[0]}</H>`); // shorter
-    (mod.highlightCode as any).mockRejectedValueOnce(new Error("boom")); // edit catch
-    const report = [
-      "fls 1.2.0 | run r1 | /x | 2026",
-      "",
-      "[1] SKIP  EDIT a.ts",
-      "    ignoré : une écriture précédente a échoué",
-      "",
-      "[2] WARN  NOTE x",
-      "",
-      "[3] OK    READ f.ts (2 lignes)",
-      "=== f.ts (2 lignes) ===",
-      "  1 | first",
-      "weird-no-prefix",
-      "=== fin ===",
-      "",
-      "[4] OK    EDIT f.ts (1 bloc(s), +2 -0)",
-      "@@ bloc 1",
-      "+ a",
-      "+ b",
-      "",
-      "Résumé : 2 OK, 0 FAIL, 1 SKIP",
-    ].join("\n");
-    const out = await colorizeReportText(report, targets);
-    expect(out).toContain("\x1b[");
-  });
-
   it("emit non coloré tronqué file/clip", async () => {
     const dir = sb({ "a.ts": "const a = 1\n".repeat(200) });
     const f = fake(dir, { stdoutTTY: false });
@@ -749,45 +579,6 @@ describe("coverage extras", () => {
     const rawLink = "d\n└── link\n    -> target";
     const outLink = await colorizeQuickTree(rawLink, ws, "d", "d", targets);
     expect(outLink).toContain("-> target");
-    // GREP with no quoted pattern, match not found, and non-grep line
-    const report = [
-      "fls 1.2.0 | run r1 | /x | 2026",
-      "",
-      '[1] OK    GREP "foo" dans . (1 correspondance(s) dans 1 fichier(s))',
-      "a.ts:1: bar baz",
-      "plain line",
-      "",
-      "[2] OK    GREP foo dans . (1 correspondance(s) dans 1 fichier(s))",
-      "a.ts:1: foo bar",
-      "",
-      "Résumé : 2 OK, 0 FAIL, 0 SKIP",
-    ].join("\n");
-    const out = await colorizeReportText(report, targets);
-    expect(out).toContain("bar");
-    expect(out).toContain("foo");
   });
 
-  it("read sans fin et edit hl court", async () => {
-    const mod = await import("./highlight.ts");
-    (mod.highlightCode as any)
-      .mockImplementationOnce(async (code: string) => code.split("\n").map((l) => `<H>${l}</H>`).join("\n")) // read
-      .mockImplementationOnce(async (code: string) => `<H>${code.split("\n")[0]}</H>`); // edit shorter
-    const report = [
-      "fls 1.2.0 | run r1 | /x | 2026",
-      "",
-      "[1] OK    READ f.ts (1 lignes)",
-      "=== f.ts (1 lignes) ===",
-      "hello",
-      "",
-      "[2] OK    EDIT f.ts (1 bloc(s), +2 -0)",
-      "@@ bloc 1",
-      "+ a",
-      "+ b",
-      "",
-      "Résumé : 2 OK, 0 FAIL, 0 SKIP",
-    ].join("\n");
-    const out = await colorizeReportText(report, targets);
-    expect(out).toContain("hello");
-    expect(out).toContain("\x1b[");
-  });
 });

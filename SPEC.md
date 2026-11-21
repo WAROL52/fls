@@ -309,7 +309,7 @@ Premier outil qui réussit, dans l'ordre : `wl-paste` / `wl-copy`, `xclip -selec
 
 - **Entrées/sorties injectées** (`Io` : dossier courant, entrée standard, sorties, presse-papiers, horloge, identifiant) ; `main(argv, io)` renvoie le code de sortie. Le vrai `Io` n'est construit qu'au chargement du module, et le démarrage passe par `bootstrap(isEntry(...), start)`, entièrement testable.
 - **Tables** plutôt que chaînes de `if` : directives (`DIRECTIVES`, utilisées par le parseur, l'aide et la spec), sous-commandes, options globales, lecteurs/écrivains de blocs, vérifications d'écriture, outils de presse-papiers.
-- **Modules** : `src/fls.ts` (parseur, exécution, rapport, journal, aide, CLI), `src/directive/<nom>.ts` (une `Spec` par directive, assemblées par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
+- **Modules** : `src/fls.ts` (parseur, exécution, journal, aide, CLI), `src/report/` (le Rapport comme donnée : `segments.ts` types `Segment` / `Entry` / `ReportDoc`, `plain.ts` rendu brut, `styled.ts` rendu stylé, `code-block.ts` gouttière et repli, `snapshot.ts` copie versionnée de la Dernière sortie), `src/directive/<nom>.ts` (une `Spec` par directive, assemblées par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
 - **`Workspace`** : surcouche en mémoire au-dessus du disque ; le dry-run et l'exécution réelle partagent tout le code, seul `apply` (commit) diffère.
 - **Syntaxe TypeScript effaçable uniquement** (ni `enum` ni propriétés de paramètre) : `node src/fls.ts` suffit.
 

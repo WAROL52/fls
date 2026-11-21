@@ -1,12 +1,12 @@
 import { normalizeRel } from "../paths.ts";
-import type { Ctx, Op, Spec } from "../types.ts";
+import type { Ctx, Done, Op, Spec } from "../types.ts";
 import { directive } from "./shared.ts";
 
-function runMove(ctx: Ctx, op: Op): { title: string; body: string } {
+function runMove(ctx: Ctx, op: Op): Done {
   const from = normalizeRel(op.args[0]);
   const to = normalizeRel(op.args[1]);
   ctx.ws.move(from, to);
-  return { title: `${from} -> ${to}`, body: "" };
+  return { title: `${from} -> ${to}`, body: [] };
 }
 
 export const move: Spec = directive({

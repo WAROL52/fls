@@ -8,7 +8,15 @@
 
 **Zone clip** — Portion d'un script délimitée par les marqueurs `clip start` et `clip end`. Quand elle existe, seul son contenu est lu.
 
-**Rapport** — Sortie d'une exécution : une entrée par directive (OK, FAIL, SKIP), puis un résumé.
+**Rapport** — Sortie d'une exécution : une entrée par directive (OK, FAIL, SKIP), puis un résumé. C'est une donnée (en-tête, entrées, pied) que l'on rend de deux façons : rendu brut ou rendu stylé.
+
+**Entrée** — Ce que le Rapport dit d'une directive exécutée (le `[n] OK READ …` et son corps). À ne pas confondre avec la directive elle-même.
+
+**Segment** — Partie typée du corps d'une entrée : texte, fichier lu, fichier omis, occurrences de `@grep`, diff de `@edit`. Les deux rendus partent des segments ; rien n'est reparsé.
+
+**Rendu brut** — Le texte du Rapport défini par `SPEC.md` §8. C'est le contrat : il ne change pas d'un octet.
+
+**Rendu stylé** — Le Rapport pour un terminal : couleurs, gouttière, repli à la largeur.
 
 **Run** — Exécution journalisée d'un script ayant produit au moins un changement effectif ; annulable avec `undo`.
 

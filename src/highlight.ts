@@ -1,8 +1,7 @@
 // Wrapper Shiki (async). Isolé pour faciliter les tests (mock du module).
 import { codeToANSI } from "@shikijs/cli";
 import path from "node:path";
-
-export type ColorLevel = 0 | 1 | 2 | 3;
+import { OPENCODE_THEME } from "./theme.ts";
 
 const BASENAMES: Record<string, string> = {
   dockerfile: "dockerfile",
@@ -77,7 +76,8 @@ export function langFromPath(filePath: string): string {
   return EXTS[ext] ?? "text";
 }
 
-/** `theme` : nom d'un thème Shiki, ou un objet thème (ex. `OPENCODE_THEME`). */
-export async function highlightCode(code: string, lang: string, theme: unknown, colorLevel: ColorLevel): Promise<string> {
-  return codeToANSI(code, lang as never, theme as never, { colorLevel });
-}
+/** Coloration syntaxique : une chaîne ANSI par ligne de `code` (texte non coloré si la langue est inconnue). */
+export type Highlighter = (code: string, lang: string) => Promise<string[]>;
+
+/** Adapter réel (Shiki, thème opencode sombre, 24 bits). */
+export const shikiHighlighter: Highlighter = async (code, lang) => (await codeToANSI(code, lang as never, OPENCODE_THEME as never, { colorLevel: 3 })).split("\n");

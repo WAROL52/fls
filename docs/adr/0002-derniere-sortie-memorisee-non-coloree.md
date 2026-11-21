@@ -10,7 +10,7 @@ Un terminal replie les lignes trop longues sans que le fond ni la numérotation 
 
 1. **Repli dans le bloc** : en sortie colorée vers un terminal, fls replie lui-même les lignes à la largeur du terminal (`Io.columns`). Chaque ligne visuelle a son fond ; les numéros de ligne (gouttière `N │ `) sont toujours affichés en sortie colorée, et seulement sur la première ligne visuelle.
 2. **`fls last`** : sous-commande qui réaffiche la dernière sortie sans rien réexécuter.
-3. **Ce qui est mémorisé** : la sortie **non colorée** (texte du rapport, ou racines brutes d'un `--tree`), pas le rendu ANSI. Le rendu est refait à chaque affichage, avec la couleur et la largeur du moment.
+3. **Ce qui est mémorisé** : la sortie **non colorée** (le Rapport en donnée, ou les racines brutes d'un `--tree`), pas le rendu ANSI. *(Amendé par l'ADR-0003 : à l'origine, le texte du rapport.)* Le rendu est refait à chaque affichage, avec la couleur et la largeur du moment.
 4. **Où** : `$XDG_CACHE_HOME/fls/last.json` (sinon `~/.cache/fls/last.json`), propre à l'utilisateur et non au projet. Une seule entrée, remplacée à chaque nouvelle sortie.
 5. **Quoi mémoriser** : lecture rapide, `--tree`, scripts (`--dry-run` compris). Pas `last`, l'aide, `log`, `undo`, `init`, `expand`, les erreurs.
 6. **Pas de repli** quand la sortie n'est pas un terminal, ou qu'elle est aussi écrite dans un fichier ou le presse-papiers.
@@ -30,4 +30,4 @@ Un terminal replie les lignes trop longues sans que le fond ni la numérotation 
 - Redimensionner reste « un désastre » visuel jusqu'à la prochaine commande ; `fls last` est le moyen de réajuster, comme voulu.
 - Les numéros de ligne en sortie colorée changent le rendu : la sortie colorée n'est plus une version coloriée de la sortie brute (elle a une gouttière). La sortie sans couleur est inchangée.
 - Une colonne est comptée comme un point de code : les caractères larges (CJK, emoji) ou combinants peuvent décaler le repli d'une colonne.
-- Tout changement du format de `last.json` doit rester lisible ou donner `no_last_output` (un fichier illisible n'est jamais une erreur de plus).
+- Tout changement du format de `last.json` doit rester lisible ou donner `no_last_output` (un fichier illisible n'est jamais une erreur de plus). Le format porte un numéro (`format`) depuis l'ADR-0003 ; une copie d'un autre format est traitée comme absente.
