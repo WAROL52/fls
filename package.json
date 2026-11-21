@@ -1,6 +1,6 @@
 {
   "name": "fls",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "fls — lire et modifier des fichiers en une seule commande, sans interaction. Voir SPEC.md.",
   "main": "src/fls.ts",

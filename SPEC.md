@@ -1,6 +1,6 @@
 # SPEC — fls v1
 
-Spécification du comportement de `fls.ts` (version `1.0.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
+Spécification du comportement de `fls.ts` (version `1.1.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
 
 Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lancement : `node fls.ts …` (ou un alias vers ce fichier).
 
@@ -76,6 +76,25 @@ Option inconnue, valeur manquante ou nombre invalide : `usage_error`, code de so
 - Une ligne vide, ou dont le premier caractère non blanc est `#`, est ignorée.
 - Toute autre ligne **hors bloc** doit commencer (après les espaces) par `@` suivi d'un nom de directive connu. Sinon : `syntax_error` (« ligne inattendue »).
 - Il n'y a pas de commentaire en fin de ligne de directive.
+
+### 4.1 bis Forme collable `#@` et zone clip (depuis 1.1.0)
+
+Pour qu'un script puisse être collé tel quel dans un shell (où `#…` est un commentaire) puis relu par `fls --clip` :
+
+- **`#@nom …`** (le `@` collé au `#`, suivi d'une lettre) est strictement équivalent à `@nom …` et se mélange librement avec la forme `@`. Limité aux directives de **lecture** (`tree`, `read`, `grep`, `note`) : une directive d'écriture donne `syntax_error` (« les directives d'écriture exigent la forme `@nom` »), car leurs blocs ne sont pas des commentaires pour le shell. `#@` suivi d'un nom inconnu : `syntax_error`. `#@ texte` (espace) et `# @read` restent des commentaires.
+- **Zone clip** : si le script contient au moins une ligne `clip start` (regex `^\s*#{3,}\s*clip\s+(start|end)\s*#*\s*$`, insensible à la casse, ex. `##### clip start #####`), seules les lignes situées entre `clip start` et `clip end` sont analysées (jusqu'à la fin si `clip end` manque). Plusieurs zones sont concaténées dans l'ordre ; tout le reste (texte avant, entre, après, y compris `cd … && fls --clip`) est ignoré. Sans marqueur `clip start`, aucun changement. La numérotation des lignes des erreurs reste celle du texte complet.
+- `fls expand`, le journal et le rapport écrivent toujours la forme canonique `@nom`.
+
+Exemple :
+
+```
+##### clip start #####
+#@note "rendu de la nav"
+#@read apps/web/src/components/app-sidebar.tsx
+#@grep "export type RoleName" . --context 5
+##### clip end #####
+cd ~/DEV/HIVELAB && fls --clip
+```
 
 ### 4.2 Arguments et options
 
@@ -200,7 +219,7 @@ Fichiers uniquement en v1 (un dossier donne `is_directory`, un lien symbolique `
 ## 8. Rapport
 
 ```
-fls 1.0.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
+fls 1.1.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
 
 [1] OK    TREE src
 …

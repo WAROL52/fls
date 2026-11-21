@@ -523,7 +523,7 @@ describe("fls --tree", () => {
 
   it("--dry-run, --version, --help, sous-commande", async () => {
     expect((await call(sb(files), ["--tree", "f.txt", "--dry-run"])).text).toBe("f.txt\nf\n");
-    expect((await call(sb(files), ["--tree", "--version"])).text).toBe("fls 1.0.0\n");
+    expect((await call(sb(files), ["--tree", "--version"])).text).toBe("fls 1.1.0\n");
     expect((await call(sb(files), ["--tree", "--help"])).text).toContain("--tree");
     expect((await call(sb(files), ["--tree", "expand"], { stdin: "@read f.txt\n" })).text).toBe("@read f.txt\n");
   });

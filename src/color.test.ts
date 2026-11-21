@@ -129,7 +129,7 @@ describe("colorizeReportText", () => {
   it("colorise rapport, read, diff, grep, résumé", async () => {
     const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
     const report = [
-      "fls 1.0.0 | run r1 | /x | 2026",
+      "fls 1.1.0 | run r1 | /x | 2026",
       "",
       "[1] OK    READ f.ts (1 lignes)",
       "=== f.ts (1 lignes) ===",
@@ -319,7 +319,7 @@ describe("colorizeReportText branches", () => {
   const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const };
   it("NOTE, unknown kind, bloc omis, grep sep", async () => {
     const report = [
-      "fls 1.0.0 | run r1 | /x | 2026",
+      "fls 1.1.0 | run r1 | /x | 2026",
       "",
       "[1] OK    NOTE hello world",
       "",
@@ -346,7 +346,7 @@ describe("colorizeReportText branches", () => {
   it("highlightBlock catch fallback", async () => {
     const mod = await import("./highlight.ts");
     (mod.highlightCode as any).mockRejectedValueOnce(new Error("boom"));
-    const report = ["fls 1.0.0 | run r1 | /x | 2026", "", "[1] OK    READ f.ts (1 lignes)", "=== f.ts (1 lignes) ===", "x", "=== fin ===", "", "Résumé : 1 OK, 0 FAIL, 0 SKIP"].join("\n");
+    const report = ["fls 1.1.0 | run r1 | /x | 2026", "", "[1] OK    READ f.ts (1 lignes)", "=== f.ts (1 lignes) ===", "x", "=== fin ===", "", "Résumé : 1 OK, 0 FAIL, 0 SKIP"].join("\n");
     const out = await colorizeReportText(report, targets);
     expect(out).toContain("x");
   });
@@ -370,7 +370,7 @@ describe("coverage extras", () => {
 
   it("colorResultHead fallback et edit body context", async () => {
     const report = [
-      "fls 1.0.0 | run r1 | /x | 2026",
+      "fls 1.1.0 | run r1 | /x | 2026",
       "",
       "[1] ",
       "body",
@@ -387,7 +387,7 @@ describe("coverage extras", () => {
 
   it("grep met en évidence le match", async () => {
     const report = [
-      "fls 1.0.0 | run r1 | /x | 2026",
+      "fls 1.1.0 | run r1 | /x | 2026",
       "",
       '[1] OK    GREP "foo" dans . (1 correspondance(s) dans 1 fichier(s))',
       "a.ts:1: const foo = 1",
@@ -461,7 +461,7 @@ describe("coverage extras", () => {
     (mod.highlightCode as any).mockImplementationOnce(async (code: string) => `<H>${code.split("\n")[0]}</H>`); // shorter
     (mod.highlightCode as any).mockRejectedValueOnce(new Error("boom")); // edit catch
     const report = [
-      "fls 1.0.0 | run r1 | /x | 2026",
+      "fls 1.1.0 | run r1 | /x | 2026",
       "",
       "[1] SKIP  EDIT a.ts",
       "    ignoré : une écriture précédente a échoué",
@@ -504,7 +504,7 @@ describe("coverage extras", () => {
     expect(outLink).toContain("-> target");
     // GREP with no quoted pattern, match not found, and non-grep line
     const report = [
-      "fls 1.0.0 | run r1 | /x | 2026",
+      "fls 1.1.0 | run r1 | /x | 2026",
       "",
       '[1] OK    GREP "foo" dans . (1 correspondance(s) dans 1 fichier(s))',
       "a.ts:1: bar baz",
@@ -526,7 +526,7 @@ describe("coverage extras", () => {
       .mockImplementationOnce(async (code: string) => code.split("\n").map((l) => `<H>${l}</H>`).join("\n")) // read
       .mockImplementationOnce(async (code: string) => `<H>${code.split("\n")[0]}</H>`); // edit shorter
     const report = [
-      "fls 1.0.0 | run r1 | /x | 2026",
+      "fls 1.1.0 | run r1 | /x | 2026",
       "",
       "[1] OK    READ f.ts (1 lignes)",
       "=== f.ts (1 lignes) ===",

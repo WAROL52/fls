@@ -42,7 +42,7 @@ import type {
 } from "./types.ts";
 import { sha1, Workspace } from "./workspace.ts";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
 const DEFAULT_MAX_SIZE = 1_048_576;
 const DEFAULT_MAX_OUTPUT = 200_000;
 
@@ -132,13 +132,45 @@ function parseDirective(line: string, lineNo: number): Op {
   return op;
 }
 
+const CLIP_MARKER = /^\s*#{3,}\s*clip\s+(start|end)\s*#*\s*$/i;
+const HASH_DIRECTIVE = /^#@[A-Za-z]/;
+
+/**
+ * Zone utile d'un script collé : si au moins un `clip start` existe, seules les lignes entre
+ * `clip start` et `clip end` (ou la fin) sont gardées ; le reste est blanchi (la numérotation
+ * des lignes est conservée pour les messages d'erreur).
+ */
+export function clipRegions(lines: string[]): string[] {
+  const marks = lines.map((l) => CLIP_MARKER.exec(l)?.[1].toLowerCase());
+  if (!marks.includes("start")) return lines;
+  let inside = false;
+  return lines.map((line, i) => {
+    const mark = marks[i];
+    if (mark !== undefined) {
+      inside = mark === "start";
+      return "";
+    }
+    return inside ? line : "";
+  });
+}
+
+/** `#@nom …` (collé à une lettre) devient `@nom …` ; réservé aux directives de lecture. */
+function unhash(trimmed: string, lineNo: number): string {
+  const name = /^#@([A-Za-z]+)/.exec(trimmed)?.[1] as string;
+  const spec = SPEC_BY_NAME.get(name);
+  if (spec === undefined) throw syntaxError(lineNo, `directive inconnue #@${name}`);
+  if (spec.writes) throw syntaxError(lineNo, `#@${name} : les directives d'écriture exigent la forme @${name}`);
+  return trimmed.slice(1);
+}
+
 export function parseScript(text: string): Op[] {
-  const lines = text.split(/\r?\n/);
+  const lines = clipRegions(text.split(/\r?\n/));
   const ops: Op[] = [];
   let i = 0;
   while (i < lines.length) {
-    const trimmed = lines[i].trim();
-    if (trimmed === "" || trimmed.startsWith("#")) {
+    let trimmed = lines[i].trim();
+    if (HASH_DIRECTIVE.test(trimmed)) trimmed = unhash(trimmed, i + 1);
+    else if (trimmed === "" || trimmed.startsWith("#")) {
       i += 1;
       continue;
     }

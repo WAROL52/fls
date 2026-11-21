@@ -332,6 +332,92 @@ describe("parseScript", () => {
 
 // ───────────────────────────── Directives de lecture ─────────────────────────────
 
+describe("forme #@ et zone clip", () => {
+  const names = (t: string) => fls.parseScript(t).map((o) => o.name);
+  it("#@ équivaut à @ et se mélange", () => {
+    const a = fls.parseScript('#@note "x"\n#@read f.ts 1-3\n@grep "y" . -C 2');
+    const b = fls.parseScript('@note "x"\n@read f.ts 1-3\n@grep "y" . -C 2');
+    expect(fls.serialize(a)).toBe(fls.serialize(b));
+  });
+  it("#@ + espace et # @read restent des commentaires", () => {
+    expect(fls.parseScript("#@ texte\n# @read f\n#@\n#@1")).toEqual([]);
+  });
+  it("#@ inconnu ou d'écriture : syntax_error", () => {
+    expect(() => fls.parseScript("#@reed f")).toThrow(/directive inconnue #@reed/);
+    expect(() => fls.parseScript("#@edit f")).toThrow(/exigent la forme @edit/);
+    expect(() => fls.parseScript("\n#@delete f")).toThrow(/ligne 2/);
+  });
+  it("zone clip : le reste est ignoré", () => {
+    const t = ["avant ?", "##### clip start #####", '#@note "a"', "#@read f", "##### clip end #####", "cd ~/X && fls --clip"].join("\n");
+    expect(names(t)).toEqual(["note", "read"]);
+  });
+  it("plusieurs zones, marqueurs tolérants, end manquant", () => {
+    const t = ["### CLIP START", "#@read a", "### Clip End ###", "bruit", "###clip start", "@read b", "#@read c"].join("\n");
+    expect(names(t)).toEqual(["read", "read", "read"]);
+  });
+  it("sans clip start : comportement inchangé", () => {
+    expect(() => fls.parseScript("#@read a\ncd x && fls --clip")).toThrow(/ligne inattendue/);
+    expect(names("##### clip end #####\n#@read a")).toEqual(["read"]);
+  });
+  it("numérotation conservée avec zone clip", () => {
+    expect(() => fls.parseScript("x\n#### clip start ####\n@bogus")).toThrow(/ligne 3/);
+  });
+});
+
+describe("forme #@ de bout en bout", () => {
+  const paste = [
+    "##### clip start #####",
+    '#@note "hook session"',
+    "#@read a.ts",
+    '#@grep "needle" . --context 1',
+    "##### clip end #####",
+    "cd ~/DEV/X && fls --clip",
+  ].join("\n");
+  const files = { "a.ts": "un\ndeux\n", "b.ts": "avant\nneedle\naprès\n" };
+
+  it("--clip : lit le bloc collé (ligne cd ignorée) et copie le rapport", async () => {
+    const r = await run(["--clip"], files, { clipboard: paste });
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("OK    NOTE hook session");
+    expect(r.text).toContain("=== a.ts (2 lignes) ===");
+    expect(r.text).toContain("b.ts:2: needle");
+    expect(r.text).toContain("Résumé : 3 OK, 0 FAIL, 0 SKIP");
+    expect(r.clip.text).toBe(r.text);
+  });
+
+  it("stdin : même résultat que la forme @", async () => {
+    const hashed = await run([], files, { stdin: paste });
+    const plain = await run([], files, { stdin: '@note "hook session"\n@read a.ts\n@grep "needle" . --context 1\n' });
+    const body = (t: string) => t.split("\n").slice(1).join("\n");
+    expect(body(hashed.text)).toBe(body(plain.text));
+  });
+
+  it("--file : lit un fichier contenant des #@", async () => {
+    const r = await run(["--file", "s.fls"], { ...files, "s.fls": paste });
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("Résumé : 3 OK");
+  });
+
+  it("expand écrit la forme canonique @", async () => {
+    const r = await run(["expand"], files, { stdin: paste });
+    expect(r.text).toBe('@note "hook session"\n\n@read a.ts\n\n@grep needle . --context 1\n');
+  });
+
+  it("directive d'écriture en #@ : exit 2, rien d'exécuté", async () => {
+    const dir = sb(files);
+    const r = await call(dir, [], { stdin: '#@note "x"\n#@create n.txt\n' });
+    expect(r.code).toBe(2);
+    expect(r.errText).toMatch(/syntax_error : ligne 2 : .*exigent la forme @create/);
+    expect(exists(dir, "n.txt")).toBe(false);
+  });
+
+  it("sans clip start, la ligne cd reste une erreur de syntaxe", async () => {
+    const r = await run([], files, { stdin: "#@read a.ts\ncd ~/X && fls --clip\n" });
+    expect(r.code).toBe(2);
+    expect(r.errText).toMatch(/ligne 2/);
+  });
+});
+
 describe("@tree", () => {
   const files: Files = { "src/a.ts": "a\n", "src/lib/b.ts": "b\n", "README.md": "# hi\n", ".git/config": "x", "node_modules/x/index.js": "y" };
   const setup = (dir: string) => fs.symlinkSync("README.md", path.join(dir, "link"));
@@ -346,7 +432,7 @@ describe("@tree", () => {
     expect(r.text).toContain("    └── lib/");
     expect(r.text).not.toContain("node_modules");
     expect(r.text).not.toContain(".git");
-    expect(r.text).toContain("fls 1.0.0 | run r1 |");
+    expect(r.text).toContain("fls 1.1.0 | run r1 |");
   });
 
   it("dossier non terminal : le tronc continue", async () => {
@@ -698,7 +784,7 @@ describe("sources et sorties", () => {
   it("troncature du rapport et validation des nombres", async () => {
     const files: Files = { "a.txt": "x".repeat(500) };
     const r = await run(["a.txt", "--max-output-chars", "100"], files);
-    expect(r.text.startsWith("fls 1.0.0")).toBe(true);
+    expect(r.text.startsWith("fls 1.1.0")).toBe(true);
     expect(r.text).toMatch(/\[rapport tronqué : \d+ caractères omis/);
     for (const bad of ["0", "abc"]) {
       const e = await run(["a.txt", "--max-output-chars", bad], files);
@@ -794,7 +880,7 @@ describe("aide", () => {
   it("--help, -h, --version", async () => {
     expect((await run(["--help"])).text).toContain("fls <chemin...>");
     expect((await run(["-h"])).text).toContain("Sous-commandes".length ? "Usage :" : "");
-    expect((await run(["--version"])).text).toBe("fls 1.0.0\n");
+    expect((await run(["--version"])).text).toBe("fls 1.1.0\n");
   });
 
   it("spec contient toutes les directives et tous les codes d'erreur", async () => {
