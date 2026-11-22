@@ -22,6 +22,10 @@
 
 **Rendu stylé** — Le Rapport pour un terminal : couleurs, gouttière, repli à la largeur.
 
+**Ligne stylée** — Une ligne du rendu stylé, avant tout codage pour le terminal : des **spans**, un fond éventuel, un préfixe hors fond.
+
+**Span** — Un morceau de texte et son style (couleur, gras, discret, italique, souligné, inversé).
+
 **Journal** — Lieu où les Runs sont conservés (script plat, rapport, sauvegardes) ; `log` le lit et `undo` s'en sert pour restaurer.
 
 **Run** — Exécution journalisée d'un script ayant produit au moins un changement effectif ; annulable avec `undo`.

@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fls from "./fls.ts";
 import { shikiHighlighter, type Highlighter } from "./highlight.ts";
+import { span } from "./style.ts";
 import { DEFAULT_MAX_OUTPUT, deliver, destinationsFor, type Delivery } from "./output.ts";
 import type { ReportDoc } from "./report/segments.ts";
 import type { Args, Io, Report } from "./types.ts";
@@ -27,9 +28,9 @@ const ioOf = (o: Partial<Io> = {}): Io => ({ cwd: "/work", stdinIsTTY: false, st
 
 describe("destinationsFor", () => {
   it("par défaut : stdout seul, brut hors terminal, octets exacts autorisés, aucune limite explicite", () => {
-    const { destinations, style } = destinationsFor(args(), ioOf());
+    const { destinations, level } = destinationsFor(args(), ioOf());
     expect(destinations).toEqual([{ to: "stdout", styled: false, columns: undefined, limit: undefined, exactBytes: true }]);
-    expect(style.level).toBe(3);
+    expect(level).toBe(3);
   });
 
   it("terminal : stdout stylé et largeur du terminal ; hors terminal, la largeur n'est pas retenue", () => {
@@ -69,10 +70,10 @@ describe("destinationsFor", () => {
   });
 
   it("style : couleur éteinte (--no-color, NO_COLOR), fond FLS_BG, highlighter injecté sinon Shiki", () => {
-    expect(destinationsFor(args(["no-color"]), ioOf({ stdoutIsTTY: true })).style.level).toBe(0);
+    expect(destinationsFor(args(["no-color"]), ioOf({ stdoutIsTTY: true })).level).toBe(0);
     expect(destinationsFor(args(), ioOf({ stdoutIsTTY: true, env: { NO_COLOR: "1" } })).destinations[0].styled).toBe(false);
     expect(destinationsFor(args(), ioOf({ env: { FLS_BG: "#010203" } })).style.bg).toEqual([1, 2, 3]);
-    const mine: Highlighter = async (c) => c.split("\n");
+    const mine: Highlighter = async (c) => c.split("\n").map((l) => span(l));
     expect(destinationsFor(args(), ioOf({ highlighter: mine })).style.highlighter).toBe(mine);
     expect(destinationsFor(args(), ioOf()).style.highlighter).toBe(shikiHighlighter);
   });
@@ -91,12 +92,12 @@ describe("deliver", () => {
     const calls: string[] = [];
     const highlighter: Highlighter = async (code, lang) => {
       calls.push(lang);
-      return code.split("\n").map((l) => `<H>${l}</H>`);
+      return code.split("\n").map((l) => span(`<H>${l}</H>`));
     };
     const io = ioOf({ out: (t) => { out.push(t); }, clipboard: { read: () => "", write: (t) => { clip.push(t); } }, highlighter, ...o });
     return { io, out, clip, calls };
   };
-  const delivery = (destinations: Delivery["destinations"], io: Io): Delivery => ({ destinations, style: { level: 3, highlighter: io.highlighter as Highlighter } });
+  const delivery = (destinations: Delivery["destinations"], io: Io): Delivery => ({ destinations, level: 3, style: { highlighter: io.highlighter as Highlighter } });
   const dest = (over: Partial<Delivery["destinations"][number]> = {}) => ({ to: "stdout" as const, styled: false, exactBytes: true, ...over });
 
   it("brut : le texte du Rapport, sans rendu stylé", async () => {

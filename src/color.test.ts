@@ -1,60 +1,18 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { applyLineBg, palette, safeTruncate } from "./ansi.ts";
 import { colorMode, colorPlan } from "./color.ts";
 import type { Highlighter } from "./highlight.ts";
+import { span } from "./style.ts";
 import { expandTabs } from "./report/code-block.ts";
 import * as fls from "./fls.ts";
 import { fake as baseFake, sandbox, type FakeOpts } from "./testing/io.ts";
 
 /** Highlighter de test : entoure chaque ligne de <H>…</H> (assertions lisibles, indépendantes du thème). */
-const markHighlighter: Highlighter = async (code) => code.split("\n").map((l) => `<H>${l}</H>`);
+const markHighlighter: Highlighter = async (code) => code.split("\n").map((l) => span(`<H>${l}</H>`));
 
 const sb = sandbox;
 const fake = (cwd: string, o: FakeOpts = {}) => baseFake(cwd, { highlighter: markHighlighter, ...o });
-
-describe("ansi", () => {
-  it("palette niveau 0 est identity", () => {
-    const p = palette(0);
-    expect(p.ok("x")).toBe("x");
-    expect(p.fail("x")).toBe("x");
-    expect(p.bgCode.wrap("x")).toBe("x");
-    expect(p.bgAdd.wrap("")).toBe("");
-  });
-
-  it("palette couleur wrap et reset", () => {
-    const p = palette(3);
-    for (const k of ["ok","fail","skip","note","dim","bold","cyan","red","green","yellow","match"] as const) {
-      expect(p[k]("x")).toContain("\x1b[");
-    }
-    expect(p.bgCode.wrap("x")).toContain("\x1b[48;2;20;20;20m");
-    expect(p.bgAdd.wrap("x")).toContain("48;2;32;48;59");
-    expect(p.bgDel.wrap("x")).toContain("48;2;55;34;44");
-  });
-
-  it("niveaux 16 et 256", () => {
-    expect(palette(1).ok("x")).toContain("\x1b[32m");
-    expect(palette(2).ok("x")).toContain("38;5;");
-  });
-
-  it("applyLineBg réapplique fond après reset", () => {
-    const p = palette(3);
-    const s = applyLineBg("a\x1b[0mb\nc", p.bgCode);
-    expect(s).toContain(p.bgCode.open);
-    expect(s.split("\n")).toHaveLength(2);
-    expect(applyLineBg("", p.bgCode)).toBe("");
-    expect(applyLineBg("x", palette(0).bgCode)).toBe("x");
-  });
-
-  it("safeTruncate ne coupe pas dans une escape", () => {
-    expect(safeTruncate("abc", 10)).toEqual({ text: "abc", truncated: false });
-    const s = "ab\x1b[31mcd\x1b[0m";
-    const t = safeTruncate(s, 4); // inside escape
-    expect(t.truncated).toBe(true);
-    expect(t.text).toBe("ab");
-  });
-});
 
 describe("color mode", () => {
   it("résout modes et aliases", () => {
@@ -83,17 +41,6 @@ describe("color mode", () => {
     expect(t.file).toBe(true);
     expect(t.clip).toBe(true);
   });
-});
-
-describe("fond (bg) limité aux contenus de fichier", () => {
-  const BG = "\x1b[48;2;20;20;20m";
-  const targets = { level: 3 as const, highlighter: markHighlighter };
-  const lineOf = (out: string, needle: string): string => out.split("\n").find((l) => l.includes(needle)) as string;
-
-  it("ligne vide de fichier : le fond remplit jusqu'au bord", () => {
-    expect(palette(3).bgCode.wrap("")).toBe(`${BG}\x1b[K\x1b[0m`);
-  });
-
 });
 
 describe("tabulations : le fond doit couvrir l'indentation", () => {
@@ -346,7 +293,6 @@ describe("fls --colored", () => {
 });
 
 describe("colorize intégration", () => {
-  const targets = { level: 3 as const, highlighter: markHighlighter };
 
   it("read avec line-numbers et dossier", async () => {
     const dir = sb({ "f.ts": "const a = 1\nconst b = 2\n", "d/x.ts": "export const x = 1\n" });
@@ -437,20 +383,7 @@ describe("colorize intégration", () => {
 });
 
 describe("coverage extras", () => {
-  const targets = { level: 3 as const, highlighter: markHighlighter };
 
-  it("safeTruncate recule dans escape incomplète", () => {
-    const s = "ab\x1b[31mcd";
-    const r = safeTruncate(s, 4);
-    expect(r.truncated).toBe(true);
-    expect(r.text).toBe("ab");
-    // complete escape at cut point: no backtrack
-    const r2 = safeTruncate("ab\x1b[31mcd", 7);
-    expect(r2.truncated).toBe(true);
-    expect(r2.text).toBe("ab\x1b[31m");
-    // no escape nearby
-    expect(safeTruncate("abcdef", 3).text).toBe("abc");
-  });
 
   it("parseArgs --flag=value erreur", () => {
     expect(() => fls.parseArgs(["--tree=yes"])).toThrow(/n'attend pas de valeur/);

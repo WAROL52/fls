@@ -5,11 +5,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { numberArg } from "./args.ts";
-import { colorPlan, truncate } from "./color.ts";
+import { toAnsi, type ColorLevel } from "./ansi.ts";
+import { colorPlan } from "./color.ts";
 import { shikiHighlighter } from "./highlight.ts";
 import { saveLast } from "./last.ts";
 import { renderStyled, type StyleOptions } from "./report/styled.ts";
 import { renderTreeStyled } from "./report/tree-styled.ts";
+import type { Line } from "./style.ts";
 import type { Args, Content, Io, Report } from "./types.ts";
 
 export const DEFAULT_MAX_OUTPUT = 200_000;
@@ -34,6 +36,8 @@ export type Style = Omit<StyleOptions, "columns">;
 export interface Delivery {
   destinations: Destination[];
   style: Style;
+  /** Niveau de couleur de la sérialisation ANSI des destinations stylées. */
+  level: ColorLevel;
 }
 
 /** Destinations d'une commande : stdout (sauf avec `--output`), le fichier de `--output`, le presse-papiers. */
@@ -46,35 +50,40 @@ export function destinationsFor(args: Args, io: Io): Delivery {
       ? [{ to: "stdout", styled: plan.stdout, columns: plan.stdout ? io.columns : undefined, limit, exactBytes: true }]
       : [{ to: "file", path: path.resolve(io.cwd, output), styled: plan.file, limit, exactBytes: false }];
   if (args.flags.has("clip") || args.flags.has("clip-out")) destinations.push({ to: "clip", styled: plan.clip, limit, exactBytes: false });
-  return { destinations, style: { level: plan.level, bg: plan.bg, highlighter: io.highlighter ?? shikiHighlighter } };
+  return { destinations, style: { bg: plan.bg, highlighter: io.highlighter ?? shikiHighlighter }, level: plan.level };
 }
 
-const renderContent = (content: Content, o: StyleOptions): Promise<string> =>
+const renderContent = (content: Content, o: StyleOptions): Promise<Line[]> =>
   content.kind === "report" ? renderStyled(content.doc, o) : renderTreeStyled(content.roots, o);
 
-function withTruncation(text: string, limit: number, styled: boolean): string {
-  if (text.length <= limit) return text;
-  const cut = styled ? truncate(text, limit).text : text.slice(0, limit);
-  return `${cut}\n[rapport tronqué : ${text.length - cut.length} caractères omis ; relance avec --max-output-chars]\n`;
+const notice = (omitted: number): string => `\n[rapport tronqué : ${omitted} caractères omis ; relance avec --max-output-chars]\n`;
+
+/** Texte brut : coupé à la limite, avec l'avis de troncature. */
+function plainShown(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}${notice(text.length - limit)}`;
 }
 
 /** Rend le Rapport pour chaque destination, tronque, écrit, puis mémorise la Dernière sortie si demandé. */
 export async function deliver(report: Report, delivery: Delivery, io: Io): Promise<void> {
-  const rendered = new Map<string, Promise<string>>();
-  const render = (styled: boolean, columns: number | undefined): Promise<string> => {
-    if (!styled) return Promise.resolve(report.text);
+  const laidOut = new Map<string, Promise<Line[]>>();
+  const layout = (columns: number | undefined): Promise<Line[]> => {
     const key = `${columns}`;
-    const known = rendered.get(key);
+    const known = laidOut.get(key);
     if (known !== undefined) return known;
     const fresh = renderContent(report.content as Content, { ...delivery.style, columns });
-    rendered.set(key, fresh);
+    laidOut.set(key, fresh);
     return fresh;
   };
   for (const d of delivery.destinations) {
     const styled = d.styled && report.content !== undefined;
     const limit = d.limit ?? (report.content?.kind === "tree" ? Infinity : DEFAULT_MAX_OUTPUT);
-    const text = await render(styled, d.columns);
-    const shown: string | Buffer = !styled && d.exactBytes && report.raw !== undefined && text.length <= limit ? report.raw : withTruncation(text, limit, styled);
+    let shown: string | Buffer;
+    if (styled) {
+      const s = toAnsi(await layout(d.columns), delivery.level, limit);
+      shown = s.truncated ? `${s.text}${notice(s.total - s.text.length)}` : s.text;
+    } else {
+      shown = d.exactBytes && report.raw !== undefined && report.text.length <= limit ? report.raw : plainShown(report.text, limit);
+    }
     if (d.to === "stdout") io.out(shown);
     else if (d.to === "file") fs.writeFileSync(d.path as string, shown);
     else io.clipboard.write(String(shown));

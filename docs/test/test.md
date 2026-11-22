@@ -22,13 +22,14 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 | `src/fls.test.ts` | parseur, directives (`@tree`, `@read`, `@grep`, `@note`, `@edit`, écritures, `@delete`, `@move`), exécution et politique d'échec, sources et sorties, journal / `undo` / `log`, aide, `parseArgs` et `main`, presse-papiers, E/S réelles et point d'entrée |
 | `src/report.test.ts` | le module Rapport par son interface : rendu brut (chaque segment, rapport complet), rendu stylé (fond, gouttière, repli, grep, diff, highlighter en erreur), copie versionnée de la Dernière sortie |
 | `src/output.test.ts` | les destinations : `destinationsFor` (règles par destination) et `deliver` (un rendu par jeu d'options, repli du terminal seul, troncature, octets exacts, mémorisation), et le cas de bout en bout `--colored --clip` |
-| `src/color.test.ts` | palette ANSI, modes de couleur, fond limité aux contenus de fichier, tabulations, `--tree --colored` sans coupe par défaut, coloration du rapport, de l'arbre et des diffs |
-| `src/wrap.test.ts` | `wrapAnsi`, numéros de ligne et repli à la largeur du terminal (`@read`, `--tree`, `@grep`, `@edit`), absence de repli vers fichier / presse-papiers ; utilise la vraie coloration Shiki |
+| `src/color.test.ts` | modes de couleur, fond limité aux contenus de fichier, tabulations, `--tree --colored` sans coupe par défaut, coloration du rapport, de l'arbre et des diffs |
+| `src/wrap.test.ts` | numéros de ligne et repli à la largeur du terminal (`@read`, `--tree`, `@grep`, `@edit`), absence de repli vers fichier / presse-papiers ; utilise la vraie coloration Shiki |
 | `src/last.test.ts` | `fls last` : réaffichage sans réexécution, réajustement de la largeur, mémorisation, erreurs (`no_last_output`, cache corrompu ou illisible), `cacheDirFor`, `terminalColumns` |
 | `src/tree-styled.test.ts` | le rendu stylé d'un arbre par sa structure (branches, contenu à la colonne du nom, marqueurs, repli, langue) et la régression « fichier dont le contenu ressemble à un arbre » |
 | `src/tree.test.ts` | `renderTree` et `walkTree` (fichiers, dossiers, liens, illisibles, surcouche mémoire, structure), `treeText` (texte reconstruit == sortie brute), `@read --tree`, `--tree` global, lecture rapide `fls --tree` |
 | `src/tree.e2e.test.ts` | parité octet pour octet avec `bin/treecat`, divergences volontaires de sécurité, mode script |
-| `src/highlight.test.ts` | coloration syntaxique (Shiki) |
+| `src/highlight.test.ts` | coloration syntaxique (Shiki) : spans, couleurs du thème opencode |
+| `src/style.test.ts` | le texte stylé : couleurs dégradées, palette, `wrapSpans`, et le sérialiseur `toAnsi` (niveaux, fond, préfixe, limite sans couper une séquence) |
 | `src/journal.test.ts` | le Journal : enregistrement, relecture, annulation, conflits et `--force`, sur de vrais dossiers |
 | `src/testing/io.ts` | l'adapter de test unique de l'`Io` (voir ci-dessous) ; `src/testing/io.test.ts` le vérifie |
 
@@ -38,7 +39,7 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 - **Vrais dossiers temporaires.** Chaque test crée son arborescence dans un dossier temporaire (`sb({ "a.ts": "…" })`) et le supprime après coup. Liens symboliques, permissions et fichiers illisibles sont réels.
 - **Vrais sous-processus quand c'est le sujet.** Le presse-papiers, le binaire et la parité `treecat` passent par de vrais processus.
 - **Tables plutôt que chaînes de `if`.** Le code est organisé pour que chaque branche soit atteignable sans astuce de test.
-- **Le highlighter est injecté, pas mocké.** Le rendu stylé reçoit un `Highlighter` (`Io.highlighter` en production, Shiki par défaut). Les tests passent un highlighter de test qui entoure chaque ligne de `<H>…</H>` : les assertions restent lisibles et indépendantes du thème. Les vraies couleurs du thème sont vérifiées dans `highlight.test.ts` et sur la vraie coloration dans `wrap.test.ts`.
+- **Le highlighter est injecté, pas mocké.** Le rendu stylé reçoit un `Highlighter` (`Io.highlighter` en production, Shiki par défaut). Les tests passent un highlighter de test qui renvoie, pour chaque ligne, un span `<H>…</H>` : les assertions restent lisibles et indépendantes du thème. Les vraies couleurs du thème sont vérifiées dans `highlight.test.ts` et sur la vraie coloration dans `wrap.test.ts`.
 
 ## Écrire un test
 
@@ -78,7 +79,7 @@ Pour une correction de bug, ajouter un test qui échoue avant le correctif et pa
 ## Tester l'affichage et `fls last`
 
 - La largeur du terminal est injectée : `Io.columns` (`undefined` hors terminal). Un test choisit `columns: 40` et vérifie que chaque ligne visuelle, ANSI retirés, fait au plus `columns - 1` colonnes, que le fond commence et finit chaque ligne et que les morceaux recollés redonnent la ligne source.
-- Le Rapport se teste **par sa structure** (`ReportDoc` → `renderPlain` / `renderStyled`), pas en reparsant du texte ou de l'ANSI.
+- Le Rapport se teste **par sa structure** (`ReportDoc` → `renderPlain` / `renderStyled`, qui renvoie des lignes stylées ; les tests les sérialisent avec `toAnsi`), pas en reparsant du texte ou de l'ANSI.
 - Le dossier de mémorisation est injecté : `Io.cacheDir`. `last.test.ts` construit une « session » (même dossier de travail et même cache d'une commande à l'autre) pour enchaîner une commande puis `fls last`.
 - Preuve de non-réexécution : modifier ou supprimer un fichier entre la commande et `fls last`, et constater que la sortie réaffichée est l'ancienne.
 

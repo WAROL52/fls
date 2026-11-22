@@ -23,6 +23,6 @@
     "vitest": "^5.1.1"
   },
   "dependencies": {
-    "@shikijs/cli": "^4.6.0"
+    "shiki": "4.6.0"
   }
 }

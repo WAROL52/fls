@@ -1,5 +1,6 @@
-import { palette, safeTruncate, type ColorLevel, type Rgb } from "./ansi.ts";
+import { toAnsi, type ColorLevel } from "./ansi.ts";
 import { FlsError } from "./errors.ts";
+import { palette, span, type Rgb } from "./style.ts";
 import type { Args, Io } from "./types.ts";
 
 export type ColorMode = "auto" | "always" | "never";
@@ -49,8 +50,4 @@ export function colorPlan(args: Args, io: Io): ColorPlan {
 }
 
 /** Message d'erreur sur stderr : en rouge quand stderr est coloré. */
-export const colorizeError = (msg: string, plan: ColorPlan): string => palette(plan.level, plan.bg).fail(msg);
-
-export function truncate(text: string, limit: number): { text: string; truncated: boolean } {
-  return safeTruncate(text, limit);
-}
+export const colorizeError = (msg: string, plan: ColorPlan): string => toAnsi([{ spans: span(msg, palette(plan.bg).fail) }], plan.level).text;

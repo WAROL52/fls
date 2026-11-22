@@ -3,15 +3,20 @@
 import { describe, expect, it } from "vitest";
 import type { Highlighter } from "./highlight.ts";
 import type { StyleOptions } from "./report/styled.ts";
-import { renderTreeStyled } from "./report/tree-styled.ts";
+import { renderTreeStyled as layout } from "./report/tree-styled.ts";
+import { toAnsi } from "./ansi.ts";
+import { span } from "./style.ts";
 import { treeText, type TreeNode } from "./tree.ts";
 
 const BG = "\x1b[48;2;20;20;20m";
 const EOL = "\x1b[K\x1b[0m";
 const strip = (t: string): string => t.replace(/\x1b\[[0-9;]*[mK]/g, "");
 const plain = (t: string): string => strip(t).replace(/<\/?H>/g, "");
-const mark: Highlighter = async (code) => code.split("\n").map((l) => `<H>${l}</H>`);
-const opts = (o: Partial<StyleOptions> = {}): StyleOptions => ({ level: 3, highlighter: mark, ...o });
+const mark: Highlighter = async (code) => code.split("\n").map((l) => span(`<H>${l}</H>`));
+const opts = (o: Partial<StyleOptions> = {}): StyleOptions => ({ highlighter: mark, ...o });
+
+/** Le rendu stylé d'un arbre sérialisé en ANSI 24 bits. */
+const renderTreeStyled = async (roots: Array<TreeNode | null>, o: StyleOptions): Promise<string> => toAnsi(await layout(roots, o), 3).text;
 
 const dir = (name: string, children: TreeNode[]): TreeNode => ({ kind: "dir", name, children });
 const file = (name: string, lines: string[], note?: "output file" | "unreadable"): TreeNode => ({ kind: "file", name, lines, ...(note === undefined ? {} : { note }) });
@@ -41,10 +46,6 @@ describe("rendu stylé d'un arbre : structure", () => {
     expect(plain(out).split("\n")).toEqual(["a.ts", "1 │ x", "", "", "b.ts", "1 │ y", ""]);
     expect(await renderTreeStyled([], opts())).toBe("");
   });
-
-  it("niveau 0 : le texte de l'arbre, sans couleur", async () => {
-    expect(await renderTreeStyled([tree, null, link("l", "t")], opts({ level: 0 }))).toBe(`${treeText(tree)}\n\n${treeText(link("l", "t"))}`);
-  });
 });
 
 describe("rendu stylé d'un arbre : racines et marqueurs", () => {
@@ -68,7 +69,7 @@ describe("rendu stylé d'un arbre : racines et marqueurs", () => {
     const langs: string[] = [];
     const spy: Highlighter = async (code, lang) => {
       langs.push(lang);
-      return code.split("\n");
+      return code.split("\n").map((l) => span(l));
     };
     await renderTreeStyled([dir("d", [file("a.ts", ["x"]), file("Dockerfile", ["y"]), file("n.txt", ["z"])])], opts({ highlighter: spy }));
     expect(langs).toEqual(["typescript", "dockerfile", "text"]);

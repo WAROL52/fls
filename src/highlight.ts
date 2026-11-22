@@ -1,6 +1,7 @@
-// Wrapper Shiki (async). Isolé pour faciliter les tests (mock du module).
-import { codeToANSI } from "@shikijs/cli";
+// Wrapper Shiki (async) : renvoie des spans (couleur, gras, italique, souligné), jamais de l'ANSI.
+import { codeToTokensBase } from "shiki";
 import path from "node:path";
+import { hexColor, span, type Span } from "./style.ts";
 import { OPENCODE_THEME } from "./theme.ts";
 
 const BASENAMES: Record<string, string> = {
@@ -76,8 +77,25 @@ export function langFromPath(filePath: string): string {
   return EXTS[ext] ?? "text";
 }
 
-/** Coloration syntaxique : une chaîne ANSI par ligne de `code` (texte non coloré si la langue est inconnue). */
-export type Highlighter = (code: string, lang: string) => Promise<string[]>;
+/** Coloration syntaxique : les spans de chaque ligne de `code` (texte sans style si la langue est inconnue). */
+export type Highlighter = (code: string, lang: string) => Promise<Span[][]>;
 
-/** Adapter réel (Shiki, thème opencode sombre, 24 bits). */
-export const shikiHighlighter: Highlighter = async (code, lang) => (await codeToANSI(code, lang as never, OPENCODE_THEME as never, { colorLevel: 3 })).split("\n");
+// bits de `fontStyle` d'un token Shiki
+const ITALIC = 1;
+const BOLD = 2;
+const UNDERLINE = 4;
+
+/** Adapter réel (Shiki, thème opencode sombre). Un token sans couleur prend celle du thème. */
+export const shikiHighlighter: Highlighter = async (code, lang) => {
+  const lines = await codeToTokensBase(code, { lang: lang as never, theme: OPENCODE_THEME as never });
+  return lines.map((line) =>
+    line.flatMap((t) =>
+      span(t.content, {
+        fg: hexColor(t.color ?? OPENCODE_THEME.fg),
+        bold: ((t.fontStyle ?? 0) & BOLD) !== 0,
+        italic: ((t.fontStyle ?? 0) & ITALIC) !== 0,
+        underline: ((t.fontStyle ?? 0) & UNDERLINE) !== 0,
+      }),
+    ),
+  );
+};

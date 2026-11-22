@@ -6,15 +6,19 @@ import type { Highlighter } from "./highlight.ts";
 import { renderPlain, renderSegment } from "./report/plain.ts";
 import { fileTitle, lastLine, textBody, type Entry, type ReportDoc, type Segment } from "./report/segments.ts";
 import { decodeSnapshot, encodeSnapshot, SNAPSHOT_FORMAT } from "./report/snapshot.ts";
-import { renderStyled, type StyleOptions } from "./report/styled.ts";
+import { renderStyled as layout, type StyleOptions } from "./report/styled.ts";
+import { toAnsi } from "./ansi.ts";
+import { span } from "./style.ts";
 
 const BG = "\x1b[48;2;20;20;20m";
 const EOL = "\x1b[K\x1b[0m";
 const strip = (t: string): string => t.replace(/\x1b\[[0-9;]*[mK]/g, "");
 /** Sans ANSI ni marqueurs <H> du highlighter de test. */
 const plain = (t: string): string => strip(t).replace(/<\/?H>/g, "");
-const mark: Highlighter = async (code) => code.split("\n").map((l) => `<H>${l}</H>`);
-const opts = (o: Partial<StyleOptions> = {}): StyleOptions => ({ level: 3, highlighter: mark, ...o });
+const mark: Highlighter = async (code) => code.split("\n").map((l) => span(`<H>${l}</H>`));
+const opts = (o: Partial<StyleOptions> = {}): StyleOptions => ({ highlighter: mark, ...o });
+/** Le rendu stylé sérialisé en ANSI 24 bits. */
+const renderStyled = async (d: ReportDoc, o: StyleOptions): Promise<string> => toAnsi(await layout(d, o), 3).text;
 const entry = (kind: string, body: Segment[], over: Partial<Entry> = {}): Entry => ({ status: "OK", kind, title: "t", code: "", body, ...over });
 const doc = (entries: Entry[]): ReportDoc => ({ header: "fls 1.2.0 | run r1 | /x | 2026", entries, footer: ["Résumé : 1 OK, 0 FAIL, 0 SKIP", "Modifiés : aucun"] });
 const file = (over: Partial<Extract<Segment, { kind: "file" }>> = {}): Segment => ({ kind: "file", path: "a.ts", from: 1, total: 2, ranged: false, numbered: false, lines: ["un", "deux"], ...over });
@@ -85,11 +89,6 @@ describe("rendu brut (SPEC §8)", () => {
 });
 
 describe("rendu stylé : structure", () => {
-  it("niveau 0 : le rendu brut", async () => {
-    const d = doc([entry("READ", [file()])]);
-    expect(await renderStyled(d, opts({ level: 0 }))).toBe(renderPlain(d));
-  });
-
   it("fond uniquement sur les lignes de code ; en-tête, titres, marqueurs, notes et résumé n'en ont pas", async () => {
     const d = doc([entry("NOTE", textBody("une note")), entry("READ", [file()])]);
     const out = await renderStyled(d, opts());
@@ -143,6 +142,17 @@ describe("rendu stylé : structure", () => {
     expect(strip(await renderStyled(d, opts()))).toBe(renderPlain(d));
   });
 
+  it("segments sans contenu : même mise en page qu'en brut (texte vide, grep sans ligne, entre d'autres segments)", async () => {
+    const noRows: Segment = { kind: "matches", pattern: "x", rows: [] };
+    const d = doc([
+      entry("A", [{ kind: "text", text: "" }]),
+      entry("B", [noRows]),
+      entry("C", [{ kind: "text", text: "avant" }, noRows, { kind: "text", text: "après" }]),
+      entry("D", [{ kind: "text", text: "a\n" }]),
+    ]);
+    expect(strip(await renderStyled(d, opts()))).toBe(renderPlain(d));
+  });
+
   it("plusieurs segments : séparés par une ligne vide, comme en brut", async () => {
     const d = doc([entry("READ", [{ kind: "text", text: "d/" }, file({ lines: ["x"], total: 1 }), file({ path: "b.ts", lines: ["y"], total: 1 })])]);
     expect(plain(await renderStyled(d, opts()))).toContain("d/\n\n=== a.ts (1 lignes) ===\n1 │ x\n=== fin ===\n\n=== b.ts (1 lignes) ===");
@@ -152,7 +162,7 @@ describe("rendu stylé : structure", () => {
     const langs: string[] = [];
     const spy: Highlighter = async (code, lang) => {
       langs.push(lang);
-      return code.split("\n");
+      return code.split("\n").map((l) => span(l));
     };
     const out = await renderStyled(doc([entry("READ", [file({ path: "src/a.ts" }), file({ path: "Dockerfile" })])]), opts({ bg: [1, 2, 3], highlighter: spy }));
     expect(out).toContain("\x1b[48;2;1;2;3m");
@@ -164,7 +174,7 @@ describe("rendu stylé : structure", () => {
     const boom: Highlighter = async () => {
       throw new Error("boom");
     };
-    const short: Highlighter = async () => ["<H>un</H>"];
+    const short: Highlighter = async () => [span("<H>un</H>")];
     for (const highlighter of [boom, short]) {
       const out = await renderStyled(doc([entry("READ", [file()])]), opts({ highlighter }));
       expect(rowsWithBg(out).map(strip).map((l) => l.replace(/<\/?H>/g, ""))).toEqual(["1 │ un", "2 │ deux"]);

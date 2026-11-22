@@ -3,9 +3,7 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { RESET, wrapAnsi } from "./ansi.ts";
 import { parseBg } from "./color.ts";
-import { palette } from "./ansi.ts";
 import { runFls, sandbox } from "./testing/io.ts";
 
 const BG = "\x1b[48;2;20;20;20m";
@@ -26,39 +24,6 @@ async function run(files: Record<string, string | Buffer>, argv: string[], o: Op
   return { dir, code: r.code, text: r.text, clip: r.clip.text };
 }
 const rowsOf = (text: string): string[] => text.split("\n").filter((l) => l.includes(BG));
-
-describe("wrapAnsi", () => {
-  it("ligne qui tient, ligne vide, largeur invalide : une seule ligne visuelle", () => {
-    expect(wrapAnsi("abc", 10)).toEqual(["abc"]);
-    expect(wrapAnsi("", 10)).toEqual([""]);
-    expect(wrapAnsi("abcdef", Infinity)).toEqual(["abcdef"]);
-    expect(wrapAnsi("abcdef", 0)).toEqual(["abcdef"]);
-  });
-
-  it("coupe à la largeur, sans ligne vide en trop quand le texte remplit exactement", () => {
-    expect(wrapAnsi("abcdef", 3)).toEqual(["abc", "def"]);
-    expect(wrapAnsi("abcdefg", 3)).toEqual(["abc", "def", "g"]);
-  });
-
-  it("indentation des lignes suivantes, comptée dans la largeur", () => {
-    expect(wrapAnsi("abcdefgh", 5, "  ")).toEqual(["abcde", "  fgh"]);
-    expect(wrapAnsi("abcdefghijkl", 5, "  ")).toEqual(["abcde", "  fgh", "  ijk", "  l"]);
-  });
-
-  it("rouvre les styles actifs sur chaque ligne et referme chaque ligne coupée", () => {
-    const rows = wrapAnsi("\x1b[31mabcdef\x1b[0m", 3);
-    expect(rows).toEqual([`\x1b[31mabc${RESET}`, "\x1b[31mdef\x1b[0m"]);
-    // plusieurs styles cumulés, puis reset : le reset vide la pile
-    const two = wrapAnsi("\x1b[1m\x1b[32mabcd\x1b[0mef", 3);
-    expect(two).toEqual([`\x1b[1m\x1b[32mabc${RESET}`, "\x1b[1m\x1b[32md\x1b[0mef"]);
-    expect(wrapAnsi("\x1b[31mab\x1b[0mcdef", 3)).toEqual(["\x1b[31mab\x1b[0mc", "def"]);
-  });
-
-  it("une séquence d'échappement ne compte pas dans la largeur ; un caractère hors BMP = une colonne", () => {
-    expect(wrapAnsi("\x1b[31mab\x1b[39mcd", 4)).toEqual(["\x1b[31mab\x1b[39mcd"]);
-    expect(wrapAnsi("a😀b😀c", 2)).toEqual(["a😀", "b😀", "c"]);
-  });
-});
 
 describe("numéros de ligne (sortie colorée)", () => {
   it("@read : chaque ligne est numérotée, numéros alignés à droite", async () => {
@@ -232,9 +197,4 @@ describe("couleur de fond (#141414 du thème opencode par défaut, FLS_BG pour s
     expect(() => parseBg("#gggggg")).toThrow(/usage_error|FLS_BG/);
   });
 
-  it("palette : niveaux 16 et 256 gardent le fond sombre par défaut (la couleur choisie ne vaut qu'en 24 bits)", () => {
-    expect(palette(1).bgCode.open).toBe("\x1b[40m");
-    expect(palette(2).bgCode.open).toBe("\x1b[48;5;233m");
-    expect(palette(3, [1, 2, 3]).bgCode.open).toBe("\x1b[48;2;1;2;3m");
-  });
 });
