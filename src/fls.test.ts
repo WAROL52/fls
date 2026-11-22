@@ -1,68 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as fls from "./fls";
+import { fake, runFls, sandbox, type FakeOpts, type Files } from "./testing/io.ts";
 
 // ───────────────────────────── Aides ─────────────────────────────
 
-type Files = Record<string, string | Buffer>;
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
-  vi.restoreAllMocks();
-});
-
-function sb(files: Files = {}): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "fls-test-")));
-  dirs.push(dir);
-  for (const [rel, data] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-    fs.writeFileSync(path.join(dir, rel), data);
-    fs.chmodSync(path.join(dir, rel), 0o644);
-  }
-  return dir;
-}
+const sb = sandbox;
+const call = runFls;
 const read = (dir: string, rel: string): string => fs.readFileSync(path.join(dir, rel), "utf8");
 const exists = (dir: string, rel: string): boolean => fs.existsSync(path.join(dir, rel));
 
-interface FakeOpts {
-  stdin?: string;
-  tty?: boolean;
-  clipboard?: string;
-  id?: string;
-}
-function fake(cwd: string, o: FakeOpts = {}) {
-  const out: string[] = [];
-  const err: string[] = [];
-  const clip = { text: o.clipboard ?? "" };
-  const io: fls.Io = {
-    cwd,
-    stdinIsTTY: o.tty ?? false,
-    readStdin: () => o.stdin ?? "",
-    out: (t) => {
-      out.push(t);
-    },
-    err: (t) => {
-      err.push(t);
-    },
-    clipboard: {
-      read: () => clip.text,
-      write: (t) => {
-        clip.text = t;
-      },
-    },
-    now: () => new Date("2026-11-19T10:00:00.123Z"),
-    newId: () => o.id ?? "r1",
-  };
-  return { io, out, err, clip };
-}
-async function call(dir: string, argv: string[], o: FakeOpts = {}) {
-  const f = fake(dir, o);
-  const code = await fls.main(argv, f.io);
-  return { code, text: f.out.join(""), errText: f.err.join(""), clip: f.clip };
-}
 async function run(argv: string[], files: Files = {}, o: FakeOpts & { setup?: (dir: string) => void } = {}) {
   const dir = sb(files);
   if (o.setup !== undefined) o.setup(dir);

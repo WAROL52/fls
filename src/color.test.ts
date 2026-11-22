@@ -1,53 +1,18 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { applyLineBg, palette, safeTruncate } from "./ansi.ts";
 import { colorMode, colorPlan } from "./color.ts";
 import type { Highlighter } from "./highlight.ts";
 import { expandTabs } from "./report/code-block.ts";
 import * as fls from "./fls.ts";
+import { fake as baseFake, sandbox, type FakeOpts } from "./testing/io.ts";
 
 /** Highlighter de test : entoure chaque ligne de <H>…</H> (assertions lisibles, indépendantes du thème). */
 const markHighlighter: Highlighter = async (code) => code.split("\n").map((l) => `<H>${l}</H>`);
 
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
-});
-
-function sb(files: Record<string, string | Buffer> = {}): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "fls-color-")));
-  dirs.push(dir);
-  for (const [rel, data] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-    fs.writeFileSync(path.join(dir, rel), data);
-  }
-  return dir;
-}
-
-function fake(cwd: string, o: { tty?: boolean; stdoutTTY?: boolean; stderrTTY?: boolean; env?: Record<string, string | undefined>; clipboard?: string; columns?: number; cacheDir?: string; highlighter?: Highlighter } = {}) {
-  const out: Array<string | Buffer> = [];
-  const err: string[] = [];
-  const clip = { text: o.clipboard ?? "" };
-  const io: fls.Io = {
-    cwd,
-    stdinIsTTY: o.tty ?? false,
-    stdoutIsTTY: o.stdoutTTY ?? false,
-    stderrIsTTY: o.stderrTTY ?? false,
-    env: o.env ?? {},
-    readStdin: () => "",
-    out: (t) => { out.push(t); },
-    err: (t) => { err.push(t); },
-    clipboard: { read: () => clip.text, write: (t) => { clip.text = t; } },
-    now: () => new Date("2026-11-19T10:00:00.123Z"),
-    newId: () => "r1",
-    columns: o.columns,
-    cacheDir: o.cacheDir,
-    highlighter: o.highlighter ?? markHighlighter,
-  };
-  return { io, out, err, clip };
-}
+const sb = sandbox;
+const fake = (cwd: string, o: FakeOpts = {}) => baseFake(cwd, { highlighter: markHighlighter, ...o });
 
 describe("ansi", () => {
   it("palette niveau 0 est identity", () => {

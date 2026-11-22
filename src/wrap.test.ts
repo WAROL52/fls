@@ -1,32 +1,17 @@
 // Repli des lignes longues à la largeur du terminal et numéros de ligne (sortie colorée).
 // Sans mock : la vraie coloration Shiki est utilisée.
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { RESET, wrapAnsi } from "./ansi.ts";
 import { parseBg } from "./color.ts";
 import { palette } from "./ansi.ts";
-import * as fls from "./fls.ts";
+import { runFls, sandbox } from "./testing/io.ts";
 
 const BG = "\x1b[48;2;20;20;20m";
 const EOL = "\x1b[K\x1b[0m";
 const strip = (t: string): string => t.replace(/\x1b\[[0-9;]*[mK]/g, "");
 const width = (t: string): number => [...strip(t)].length;
-
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
-});
-function sb(files: Record<string, string | Buffer>): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "fls-wrap-")));
-  dirs.push(dir);
-  for (const [rel, data] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-    fs.writeFileSync(path.join(dir, rel), data);
-  }
-  return dir;
-}
 
 interface Opts {
   columns?: number;
@@ -34,26 +19,11 @@ interface Opts {
   stdin?: string;
   env?: Record<string, string>;
 }
+/** Sans `stdin`, l'entrée est un terminal ; sans `tty`, la sortie en est un (c'est ce qu'on veut replier). */
 async function run(files: Record<string, string | Buffer>, argv: string[], o: Opts = {}) {
-  const dir = sb(files);
-  const out: string[] = [];
-  const clip = { text: "" };
-  const io: fls.Io = {
-    cwd: dir,
-    stdinIsTTY: o.stdin === undefined,
-    stdoutIsTTY: o.tty ?? true,
-    stderrIsTTY: false,
-    env: o.env ?? {},
-    readStdin: () => o.stdin ?? "",
-    out: (t) => { out.push(String(t)); },
-    err: () => {},
-    clipboard: { read: () => "", write: (t) => { clip.text = t; } },
-    now: () => new Date("2026-11-19T10:00:00.123Z"),
-    newId: () => "r1",
-    columns: o.columns,
-  };
-  const code = await fls.main(argv, io);
-  return { dir, code, text: out.join(""), clip: clip.text };
+  const dir = sandbox(files);
+  const r = await runFls(dir, argv, { tty: o.stdin === undefined, stdoutTTY: o.tty ?? true, stdin: o.stdin, env: o.env, columns: o.columns });
+  return { dir, code: r.code, text: r.text, clip: r.clip.text };
 }
 const rowsOf = (text: string): string[] => text.split("\n").filter((l) => l.includes(BG));
 

@@ -1,93 +1,22 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as fls from "./fls";
 import { renderTree, treeRel, treeText, walkTree, type TreeNode } from "./tree";
+import { runFls, sandbox, type FakeOpts, type Files } from "./testing/io.ts";
 import { Workspace } from "./workspace";
 
 // ───────────────────────────── Aides ─────────────────────────────
 
-type Files = Record<string, string | Buffer>;
-const dirs: string[] = [];
-
-function cleanup(d: string): void {
-  try {
-    for (const e of fs.readdirSync(d, { recursive: true, withFileTypes: true })) {
-      const p = path.join(e.parentPath, e.name);
-      try {
-        fs.chmodSync(p, e.isDirectory() ? 0o755 : 0o644);
-      } catch {
-        // ignore
-      }
-    }
-    fs.chmodSync(d, 0o755);
-  } catch {
-    // ignore
-  }
-  fs.rmSync(d, { recursive: true, force: true });
-}
-
-afterEach(() => {
-  for (const d of dirs.splice(0)) cleanup(d);
-});
-
-function sb(files: Files = {}, setup?: (dir: string) => void): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "fls-tree-")));
-  dirs.push(dir);
-  for (const [rel, data] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-    fs.writeFileSync(path.join(dir, rel), data);
-    fs.chmodSync(path.join(dir, rel), 0o644);
-  }
-  if (setup !== undefined) setup(dir);
-  return dir;
-}
+const sb = sandbox;
 
 const wsOf = (dir: string): Workspace => new Workspace(dir, 1_048_576);
 const show = (dir: string, label: string, rel: string, output: string | null = null): string =>
   renderTree(wsOf(dir), label, rel, output).toString("utf8");
 const read = (dir: string, rel: string): string => fs.readFileSync(path.join(dir, rel), "utf8");
 
-interface FakeOpts {
-  stdin?: string;
-  tty?: boolean;
-  clipboard?: string;
-  id?: string;
-}
-
-function fake(cwd: string, o: FakeOpts = {}) {
-  const out: Array<string | Buffer> = [];
-  const err: string[] = [];
-  const clip = { text: o.clipboard ?? "" };
-  const io: fls.Io = {
-    cwd,
-    stdinIsTTY: o.tty ?? false,
-    readStdin: () => o.stdin ?? "",
-    out: (t) => {
-      out.push(t);
-    },
-    err: (t) => {
-      err.push(t);
-    },
-    clipboard: {
-      read: () => clip.text,
-      write: (t) => {
-        clip.text = t;
-      },
-    },
-    now: () => new Date("2026-11-19T10:00:00.123Z"),
-    newId: () => o.id ?? "r1",
-  };
-  return { io, out, err, clip };
-}
-
-async function call(dir: string, argv: string[], o: FakeOpts = {}) {
-  const f = fake(dir, o);
-  const code = await fls.main(argv, f.io);
-  return { code, out: f.out, text: f.out.map((x) => x.toString()).join(""), errText: f.err.join(""), clip: f.clip };
-}
+const call = runFls;
 
 async function script(s: string, files: Files = {}, argv: string[] = [], o: FakeOpts = {}) {
   const dir = sb(files);

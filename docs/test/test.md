@@ -29,6 +29,8 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 | `src/tree.test.ts` | `renderTree` et `walkTree` (fichiers, dossiers, liens, illisibles, surcouche mémoire, structure), `treeText` (texte reconstruit == sortie brute), `@read --tree`, `--tree` global, lecture rapide `fls --tree` |
 | `src/tree.e2e.test.ts` | parité octet pour octet avec `bin/treecat`, divergences volontaires de sécurité, mode script |
 | `src/highlight.test.ts` | coloration syntaxique (Shiki) |
+| `src/journal.test.ts` | le Journal : enregistrement, relecture, annulation, conflits et `--force`, sur de vrais dossiers |
+| `src/testing/io.ts` | l'adapter de test unique de l'`Io` (voir ci-dessous) ; `src/testing/io.test.ts` le vérifie |
 
 ## Principes
 
@@ -39,6 +41,8 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 - **Le highlighter est injecté, pas mocké.** Le rendu stylé reçoit un `Highlighter` (`Io.highlighter` en production, Shiki par défaut). Les tests passent un highlighter de test qui entoure chaque ligne de `<H>…</H>` : les assertions restent lisibles et indépendantes du thème. Les vraies couleurs du thème sont vérifiées dans `highlight.test.ts` et sur la vraie coloration dans `wrap.test.ts`.
 
 ## Écrire un test
+
+**Adapter de test (`src/testing/io.ts`).** Les valeurs par défaut du faux `Io` (horloge fixe, id `r1`, aucun terminal, `env` vide, presse-papiers en mémoire) sont définies une seule fois. Importer le module installe le nettoyage des dossiers temporaires (même ceux dont les droits ont été retirés) et `vi.restoreAllMocks()` après chaque test. Il exporte `sandbox(files, setup?)`, `put`, `fake(cwd, options)` (renvoie `{ io, out, err, clip }`), `runFls(cwd, argv, options)` (`out` garde les morceaux bruts, `text` les décode) et `session(files)` (même dossier et même cache d'une commande à l'autre). Le faux `Io` est typé `Io` sans cast, et un test vérifie qu'il expose les mêmes champs que `createRealIo`. Les fichiers de test n'y ajoutent que de minces enveloppes (`run`, `script`).
 
 Helpers de `fls.test.ts` :
 

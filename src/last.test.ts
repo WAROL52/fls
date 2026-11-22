@@ -1,29 +1,13 @@
 // `fls last` : réafficher la dernière sortie, sans rien réexécuter, à la largeur actuelle du terminal.
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as fls from "./fls.ts";
+import { session as baseSession } from "./testing/io.ts";
 
 const BG = "\x1b[48;2;20;20;20m";
 const strip = (t: string): string => t.replace(/\x1b\[[0-9;]*[mK]/g, "");
 const width = (t: string): number => [...strip(t)].length;
-
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
-});
-function tmp(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "fls-last-")));
-  dirs.push(dir);
-  return dir;
-}
-function put(dir: string, files: Record<string, string>): void {
-  for (const [rel, data] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-    fs.writeFileSync(path.join(dir, rel), data);
-  }
-}
 
 interface Opts {
   columns?: number;
@@ -33,33 +17,12 @@ interface Opts {
 }
 /** Une « session » : même dossier de travail et même cache d'une commande à l'autre. */
 function session(files: Record<string, string> = {}) {
-  const cwd = tmp();
-  const cache = path.join(tmp(), "cache");
-  put(cwd, files);
-  const lastFile = path.join(cache, "last.json");
+  const s = baseSession(files);
   async function run(argv: string[], o: Opts = {}) {
-    const out: string[] = [];
-    const err: string[] = [];
-    const clip = { text: "" };
-    const io: fls.Io = {
-      cwd,
-      stdinIsTTY: o.stdin === undefined,
-      stdoutIsTTY: o.tty ?? false,
-      stderrIsTTY: false,
-      env: {},
-      readStdin: () => o.stdin ?? "",
-      out: (t) => { out.push(String(t)); },
-      err: (t) => { err.push(t); },
-      clipboard: { read: () => "", write: (t) => { clip.text = t; } },
-      now: () => new Date("2026-11-19T10:00:00.123Z"),
-      newId: () => "r1",
-      cacheDir: o.cacheDir === null ? undefined : (o.cacheDir ?? cache),
-      columns: o.columns,
-    };
-    const code = await fls.main(argv, io);
-    return { code, text: out.join(""), errText: err.join(""), clip: clip.text };
+    const r = await s.run(argv, { tty: o.stdin === undefined, stdoutTTY: o.tty ?? false, stdin: o.stdin, columns: o.columns, cacheDir: o.cacheDir ?? undefined, noCache: o.cacheDir === null });
+    return { code: r.code, text: r.text, errText: r.errText, clip: r.clip.text };
   }
-  return { cwd, cache, lastFile, run, put: (f: Record<string, string>) => put(cwd, f) };
+  return { ...s, run };
 }
 const rowsOf = (text: string): string[] => text.split("\n").filter((l) => l.includes(BG));
 
