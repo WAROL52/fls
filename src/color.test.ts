@@ -3,11 +3,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { applyLineBg, palette, safeTruncate } from "./ansi.ts";
-import { colorizeQuickTree, colorMode, resolveTargets } from "./color.ts";
+import { colorMode, colorPlan } from "./color.ts";
 import type { Highlighter } from "./highlight.ts";
 import { expandTabs } from "./report/code-block.ts";
 import * as fls from "./fls.ts";
-import { Workspace } from "./workspace.ts";
 
 /** Highlighter de test : entoure chaque ligne de <H>…</H> (assertions lisibles, indépendantes du thème). */
 const markHighlighter: Highlighter = async (code) => code.split("\n").map((l) => `<H>${l}</H>`);
@@ -105,16 +104,16 @@ describe("color mode", () => {
     expect(() => colorMode(args([], { color: "nope" }))).toThrow(/usage_error|--color/);
   });
 
-  it("resolveTargets suit TTY/NO_COLOR/always", () => {
+  it("colorPlan suit TTY/NO_COLOR/always", () => {
     const args = (flags: string[] = [], values: Record<string, string> = {}) =>
       ({ positional: [], flags: new Set(flags), values: new Map(Object.entries(values)), ignore: [] }) as fls.Args;
     const io = (o: any = {}) => ({ stdoutIsTTY: false, stderrIsTTY: false, env: {}, ...o }) as fls.Io;
-    expect(resolveTargets(args(), io()).stdout).toBe(false);
-    expect(resolveTargets(args(), io({ stdoutIsTTY: true })).stdout).toBe(true);
-    expect(resolveTargets(args(), io({ stdoutIsTTY: true, env: { NO_COLOR: "" } })).stdout).toBe(false);
-    expect(resolveTargets(args(["colored"]), io({ env: { NO_COLOR: "" } })).stdout).toBe(true);
-    expect(resolveTargets(args(["no-color"]), io({ stdoutIsTTY: true })).stdout).toBe(false);
-    const t = resolveTargets(args([], { color: "always" }), io());
+    expect(colorPlan(args(), io()).stdout).toBe(false);
+    expect(colorPlan(args(), io({ stdoutIsTTY: true })).stdout).toBe(true);
+    expect(colorPlan(args(), io({ stdoutIsTTY: true, env: { NO_COLOR: "" } })).stdout).toBe(false);
+    expect(colorPlan(args(["colored"]), io({ env: { NO_COLOR: "" } })).stdout).toBe(true);
+    expect(colorPlan(args(["no-color"]), io({ stdoutIsTTY: true })).stdout).toBe(false);
+    const t = colorPlan(args([], { color: "always" }), io());
     expect(t.stdout).toBe(true);
     expect(t.file).toBe(true);
     expect(t.clip).toBe(true);
@@ -123,21 +122,13 @@ describe("color mode", () => {
 
 describe("fond (bg) limité aux contenus de fichier", () => {
   const BG = "\x1b[48;2;20;20;20m";
-  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const, highlighter: markHighlighter };
+  const targets = { level: 3 as const, highlighter: markHighlighter };
   const lineOf = (out: string, needle: string): string => out.split("\n").find((l) => l.includes(needle)) as string;
 
   it("ligne vide de fichier : le fond remplit jusqu'au bord", () => {
     expect(palette(3).bgCode.wrap("")).toBe(`${BG}\x1b[K\x1b[0m`);
   });
 
-  it("fls --tree : fond sur le contenu seulement, pas sur la racine ni les noms", async () => {
-    const ws = new Workspace(fs.mkdtempSync(path.join(os.tmpdir(), "fls-bg-")));
-    const raw = "d\n└── a.ts\n    const a = 1\n";
-    const out = await colorizeQuickTree(raw, ws, "d", "d", targets);
-    expect(lineOf(out, "a.ts")).not.toContain(BG);
-    expect(lineOf(out, "const")).toContain(BG);
-    expect(out.split("\n")[0]).not.toContain(BG);
-  });
 });
 
 describe("tabulations : le fond doit couvrir l'indentation", () => {
@@ -390,7 +381,7 @@ describe("fls --colored", () => {
 });
 
 describe("colorize intégration", () => {
-  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const, highlighter: markHighlighter };
+  const targets = { level: 3 as const, highlighter: markHighlighter };
 
   it("read avec line-numbers et dossier", async () => {
     const dir = sb({ "f.ts": "const a = 1\nconst b = 2\n", "d/x.ts": "export const x = 1\n" });
@@ -478,20 +469,10 @@ describe("colorize intégration", () => {
     expect(f.out.map(String).join("")).not.toContain("\x1b[");
   });
 
-  it("colorizeQuickTree direct", async () => {
-    const dir = sb({ "d/a.ts": "const a = 1\n", "d/b": "hello\n" }, );
-    fs.mkdirSync(path.join(dir, "d/sub"));
-    fs.writeFileSync(path.join(dir, "d/sub/c.ts"), "x\n");
-    fs.symlinkSync("a.ts", path.join(dir, "d/link"));
-    const ws = new Workspace(dir, 1_048_576);
-    const raw = `d\n├── a.ts\n│   const a = 1\n├── b\n│   hello\n├── link\n│   -> a.ts\n└── sub\n    └── c.ts\n        x\n`;
-    const out = await colorizeQuickTree(raw, ws, "d", "d", targets);
-    expect(out).toContain("\x1b[");
-  });
 });
 
 describe("coverage extras", () => {
-  const targets = { stdout: true, stderr: true, file: true, clip: true, level: 3 as const, highlighter: markHighlighter };
+  const targets = { level: 3 as const, highlighter: markHighlighter };
 
   it("safeTruncate recule dans escape incomplète", () => {
     const s = "ab\x1b[31mcd";
@@ -504,20 +485,6 @@ describe("coverage extras", () => {
     expect(r2.text).toBe("ab\x1b[31m");
     // no escape nearby
     expect(safeTruncate("abcdef", 3).text).toBe("abc");
-  });
-
-  it("colorizeQuickTree root link/unreadable/output et contenu racine", async () => {
-    const dir = sb({ "a.ts": "x\n" });
-    const ws = new Workspace(dir, 1_048_576);
-    const raw = "a.ts\n-> b.ts\n";
-    const out = await colorizeQuickTree(raw, ws, "a.ts", "a.ts", targets);
-    expect(out).toContain("-> b.ts");
-    const raw2 = "a.ts\n[unreadable]\n";
-    expect(await colorizeQuickTree(raw2, ws, "a.ts", "a.ts", targets)).toContain("[unreadable]");
-    const raw3 = "a.ts\n[output file]\n";
-    expect(await colorizeQuickTree(raw3, ws, "a.ts", "a.ts", targets)).toContain("[output file]");
-    const raw4 = "f.ts\nhello\nworld\n";
-    expect(await colorizeQuickTree(raw4, ws, "f.ts", "f.ts", targets)).toContain("<H>hello</H>");
   });
 
   it("parseArgs --flag=value erreur", () => {
@@ -568,17 +535,6 @@ describe("coverage extras", () => {
     await fls.main(["--no-color", "--clip", "a.ts", "--output", "out.txt", "--max-output-chars", "80"], f.io);
     expect(fs.readFileSync(path.join(dir, "out.txt"), "utf8")).toContain("tronqué");
     expect(f.clip.text).toContain("tronqué");
-  });
-
-  it("branches restantes color", async () => {
-    const dir = sb({});
-    const ws = new Workspace(dir, 1_048_576);
-    // quickTree level 0
-    expect(await colorizeQuickTree("a\n└── b\n    x\n", ws, "a", "a", { ...targets, level: 0 })).toBe("a\n└── b\n    x\n");
-    // link at end of file (no line after -> target)
-    const rawLink = "d\n└── link\n    -> target";
-    const outLink = await colorizeQuickTree(rawLink, ws, "d", "d", targets);
-    expect(outLink).toContain("-> target");
   });
 
 });

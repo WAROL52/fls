@@ -16,6 +16,10 @@
 
 **Rendu brut** — Le texte du Rapport défini par `SPEC.md` §8. C'est le contrat : il ne change pas d'un octet.
 
+**Arbre** — Une lecture `--tree` en donnée : dossiers, fichiers (avec leurs lignes) et liens, lue une fois. La sortie brute (octets exacts façon `treecat`), le rendu stylé et la Dernière sortie en sont tirés ; aucun texte n'est reparsé.
+
+**Destination** — Là où part une sortie : le terminal, le fichier de `--output`, le presse-papiers. Chacune a ses propres options (couleur, largeur, limite de taille) ; seul le terminal a une largeur.
+
 **Rendu stylé** — Le Rapport pour un terminal : couleurs, gouttière, repli à la largeur.
 
 **Run** — Exécution journalisée d'un script ayant produit au moins un changement effectif ; annulable avec `undo`.

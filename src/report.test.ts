@@ -223,7 +223,10 @@ describe("rendu stylé : grep et diff", () => {
 
 describe("copie de la Dernière sortie", () => {
   const report = { kind: "report" as const, doc: doc([entry("READ", [file()])]) };
-  const tree = { kind: "tree" as const, roots: [{ p: "d", label: "d", raw: "d\n" }, null] };
+  const tree = {
+    kind: "tree" as const,
+    roots: [{ kind: "dir" as const, name: "d", children: [{ kind: "file" as const, name: "a.ts", lines: ["x"] }, { kind: "file" as const, name: "b", lines: [], note: "unreadable" as const }, { kind: "link" as const, name: "l", target: "a.ts" }] }, null],
+  };
 
   it("aller-retour : le Rapport (et les arbres) reviennent à l'identique", () => {
     expect(decodeSnapshot(JSON.parse(JSON.stringify(encodeSnapshot(report))))).toEqual(report);
@@ -237,6 +240,14 @@ describe("copie de la Dernière sortie", () => {
       { format: SNAPSHOT_FORMAT }, { format: SNAPSHOT_FORMAT, snapshot: null },
       { format: SNAPSHOT_FORMAT, snapshot: { kind: "autre" } },
       { format: SNAPSHOT_FORMAT, snapshot: { kind: "tree", roots: "non" } },
+      { format: 2, snapshot: { kind: "tree", roots: [{ p: "d", label: "d", raw: "d\n" }] } }, // arbres en texte (format 2)
+      { format: SNAPSHOT_FORMAT, snapshot: { kind: "tree", roots: [3] } },
+      { format: SNAPSHOT_FORMAT, snapshot: { kind: "tree", roots: [{ kind: "dir", name: "d", children: [{ kind: "autre", name: "x" }] }] } },
+      { format: SNAPSHOT_FORMAT, snapshot: { kind: "tree", roots: [{ kind: "dir", name: 1, children: [] }] } },
+      { format: SNAPSHOT_FORMAT, snapshot: { kind: "tree", roots: [{ kind: "dir", name: "d", children: "non" }] } },
+      { format: SNAPSHOT_FORMAT, snapshot: { kind: "tree", roots: [{ kind: "file", name: "f", lines: [1] }] } },
+      { format: SNAPSHOT_FORMAT, snapshot: { kind: "tree", roots: [{ kind: "file", name: "f", lines: [], note: "inconnue" }] } },
+      { format: SNAPSHOT_FORMAT, snapshot: { kind: "tree", roots: [{ kind: "link", name: "l" }] } },
       { format: SNAPSHOT_FORMAT, snapshot: { kind: "report" } },
       { format: SNAPSHOT_FORMAT, snapshot: { kind: "report", doc: { header: 1, entries: [], footer: [] } } },
       { format: SNAPSHOT_FORMAT, snapshot: { kind: "report", doc: { header: "h", entries: {}, footer: [] } } },

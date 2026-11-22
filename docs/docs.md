@@ -149,7 +149,7 @@ Les couleurs sont celles du thème **opencode** (sombre) : code sur un fond `#14
 
 Pour accorder le fond au thème de votre terminal, définissez `FLS_BG` avec une couleur `#rrggbb` (par exemple dans `~/.bashrc` : `export FLS_BG='#1e2127'`). Une valeur invalide est refusée (`usage_error`).
 
-En sortie colorée, chaque ligne de fichier est précédée de son **numéro** (`12 │ code`). Sur un terminal, les lignes trop longues sont **repliées dans le bloc** (le numéro n'apparaît que sur la première ligne visuelle, les suivantes ont une gouttière vide) : plus de confusion entre une ligne repliée et une nouvelle ligne. Redimensionner le terminal ne reflue pas l'affichage déjà produit : relancez la commande ou tapez `fls last`. Pas de repli quand la sortie n'est pas un terminal, ni quand elle est aussi écrite dans un fichier ou le presse-papiers.
+En sortie colorée, chaque ligne de fichier est précédée de son **numéro** (`12 │ code`). Sur un terminal, les lignes trop longues sont **repliées dans le bloc** (le numéro n'apparaît que sur la première ligne visuelle, les suivantes ont une gouttière vide) : plus de confusion entre une ligne repliée et une nouvelle ligne. Redimensionner le terminal ne reflue pas l'affichage déjà produit : relancez la commande ou tapez `fls last`. Le repli ne concerne que le terminal : la sortie écrite dans un fichier (`--output`) ou le presse-papiers (`--clip`) n'est jamais repliée, et ne l'empêche pas à l'écran. Pas de repli non plus si la sortie n'est pas un terminal.
 
 ## Options utiles
 

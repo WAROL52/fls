@@ -13,7 +13,7 @@ Un terminal replie les lignes trop longues sans que le fond ni la numérotation 
 3. **Ce qui est mémorisé** : la sortie **non colorée** (le Rapport en donnée, ou les racines brutes d'un `--tree`), pas le rendu ANSI. *(Amendé par l'ADR-0003 : à l'origine, le texte du rapport.)* Le rendu est refait à chaque affichage, avec la couleur et la largeur du moment.
 4. **Où** : `$XDG_CACHE_HOME/fls/last.json` (sinon `~/.cache/fls/last.json`), propre à l'utilisateur et non au projet. Une seule entrée, remplacée à chaque nouvelle sortie.
 5. **Quoi mémoriser** : lecture rapide, `--tree`, scripts (`--dry-run` compris). Pas `last`, l'aide, `log`, `undo`, `init`, `expand`, les erreurs.
-6. **Pas de repli** quand la sortie n'est pas un terminal, ou qu'elle est aussi écrite dans un fichier ou le presse-papiers.
+6. **Pas de repli** quand la sortie n'est pas un terminal. *(Amendé par l'ADR-0004 : à l'origine, aussi quand la sortie colorée était écrite dans un fichier ou le presse-papiers.)*
 7. L'écriture du cache n'est jamais fatale.
 
 ## Alternatives écartées

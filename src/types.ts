@@ -2,6 +2,7 @@
 
 import type { Highlighter } from "./highlight.ts";
 import type { ReportDoc, Segment } from "./report/segments.ts";
+import type { TreeNode } from "./tree.ts";
 import type { Workspace } from "./workspace.ts";
 
 export type Kind = "file" | "dir" | "link";
@@ -26,22 +27,20 @@ export interface Done {
   body: Segment[];
 }
 
-/** Copie non colorée de la sortie, de quoi la réafficher (`fls last`) sans réexécuter. */
-export type Snapshot =
+/** La donnée d'une sortie, non colorée : de quoi la rendre (brut ou stylé) et la mémoriser (`fls last`). */
+export type Content =
   | { kind: "report"; doc: ReportDoc }
-  | { kind: "tree"; roots: Array<{ p: string; label: string; raw: string } | null> };
+  | { kind: "tree"; roots: Array<TreeNode | null> };
 
 export interface Report {
   /** Rendu brut (SPEC §8) : troncature, journal, --clip, sortie non colorée. */
   text: string;
-  /** Le Rapport en donnée (lectures rapides et scripts) : rendu stylé et Dernière sortie. */
-  doc?: ReportDoc;
-  /** Mémorisée par `emit` pour `fls last` (absente : sortie non mémorisable). */
-  snapshot?: Snapshot;
-  /** Sortie brute (mode tree) : écrite telle quelle si elle n'est pas tronquée. */
+  /** La sortie en donnée (lectures, scripts, `--tree`) ; absente pour l'aide, `log`, `expand`, `spec` (texte brut). */
+  content?: Content;
+  /** Mémoriser `content` comme Dernière sortie (`fls last`). */
+  remember?: boolean;
+  /** Octets exacts d'une lecture `--tree` : écrits tels quels sur stdout (sans couleur) s'ils ne sont pas tronqués. */
   raw?: Buffer;
-  /** Sortie `--tree` déjà colorée (ANSI) : emit ne la rend pas une seconde fois. */
-  preColored?: boolean;
   code: number;
 }
 

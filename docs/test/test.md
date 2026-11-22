@@ -21,10 +21,12 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 |---|---|
 | `src/fls.test.ts` | parseur, directives (`@tree`, `@read`, `@grep`, `@note`, `@edit`, écritures, `@delete`, `@move`), exécution et politique d'échec, sources et sorties, journal / `undo` / `log`, aide, `parseArgs` et `main`, presse-papiers, E/S réelles et point d'entrée |
 | `src/report.test.ts` | le module Rapport par son interface : rendu brut (chaque segment, rapport complet), rendu stylé (fond, gouttière, repli, grep, diff, highlighter en erreur), copie versionnée de la Dernière sortie |
+| `src/output.test.ts` | les destinations : `destinationsFor` (règles par destination) et `deliver` (un rendu par jeu d'options, repli du terminal seul, troncature, octets exacts, mémorisation), et le cas de bout en bout `--colored --clip` |
 | `src/color.test.ts` | palette ANSI, modes de couleur, fond limité aux contenus de fichier, tabulations, `--tree --colored` sans coupe par défaut, coloration du rapport, de l'arbre et des diffs |
 | `src/wrap.test.ts` | `wrapAnsi`, numéros de ligne et repli à la largeur du terminal (`@read`, `--tree`, `@grep`, `@edit`), absence de repli vers fichier / presse-papiers ; utilise la vraie coloration Shiki |
 | `src/last.test.ts` | `fls last` : réaffichage sans réexécution, réajustement de la largeur, mémorisation, erreurs (`no_last_output`, cache corrompu ou illisible), `cacheDirFor`, `terminalColumns` |
-| `src/tree.test.ts` | `renderTree` (fichiers, dossiers, liens, illisibles, surcouche mémoire), `@read --tree`, `--tree` global, lecture rapide `fls --tree` |
+| `src/tree-styled.test.ts` | le rendu stylé d'un arbre par sa structure (branches, contenu à la colonne du nom, marqueurs, repli, langue) et la régression « fichier dont le contenu ressemble à un arbre » |
+| `src/tree.test.ts` | `renderTree` et `walkTree` (fichiers, dossiers, liens, illisibles, surcouche mémoire, structure), `treeText` (texte reconstruit == sortie brute), `@read --tree`, `--tree` global, lecture rapide `fls --tree` |
 | `src/tree.e2e.test.ts` | parité octet pour octet avec `bin/treecat`, divergences volontaires de sécurité, mode script |
 | `src/highlight.test.ts` | coloration syntaxique (Shiki) |
 

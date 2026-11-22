@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fls from "./fls";
-import { renderTree, treeRel } from "./tree";
+import { renderTree, treeRel, treeText, walkTree, type TreeNode } from "./tree";
 import { Workspace } from "./workspace";
 
 // ───────────────────────────── Aides ─────────────────────────────
@@ -544,5 +544,134 @@ describe("fls --tree", () => {
     const r = await call(sb(files), ["--tree", "--paths-from", "nope"]);
     expect(r.code).toBe(1);
     expect(r.errText).toContain("ENOENT");
+  });
+});
+
+// ───────────────────────────── Structure (walkTree, treeText) ─────────────────────────────
+
+const walk = (dir: string, label: string, rel: string, output: string | null = null) => walkTree(wsOf(dir), label, rel, output);
+const nodeOf = (dir: string, label: string, rel: string, output: string | null = null): TreeNode => walk(dir, label, rel, output).node;
+const fileOf = (name: string, lines: string[], note?: "output file" | "unreadable"): TreeNode => ({ kind: "file", name, lines, ...(note === undefined ? {} : { note }) });
+
+describe("walkTree : structure d'un fichier", () => {
+  it("lignes du contenu : sans retour à la ligne, newline final sans ligne vide, lignes vides conservées", () => {
+    expect(nodeOf(sb({ "f.txt": "a\nb\n" }), "f.txt", "f.txt")).toEqual(fileOf("f.txt", ["a", "b"]));
+    expect(nodeOf(sb({ "f.txt": "a\nb" }), "f.txt", "f.txt")).toEqual(fileOf("f.txt", ["a", "b"]));
+    expect(nodeOf(sb({ "f.txt": "" }), "f.txt", "f.txt")).toEqual(fileOf("f.txt", []));
+    expect(nodeOf(sb({ "f.txt": "a\n\n" }), "f.txt", "f.txt")).toEqual(fileOf("f.txt", ["a", ""]));
+    expect(nodeOf(sb({ "f.txt": "\n" }), "f.txt", "f.txt")).toEqual(fileOf("f.txt", [""]));
+  });
+
+  it("NUL retirés, CRLF conservé, octets non UTF-8 décodés avec remplacement (les octets exacts sont dans raw)", () => {
+    expect(nodeOf(sb({ "f.txt": Buffer.from("a\0b\n") }), "f.txt", "f.txt")).toEqual(fileOf("f.txt", ["ab"]));
+    expect(nodeOf(sb({ "f.txt": Buffer.from([0]) }), "f.txt", "f.txt")).toEqual(fileOf("f.txt", []));
+    expect(nodeOf(sb({ "f.txt": "a\r\nb\r\n" }), "f.txt", "f.txt")).toEqual(fileOf("f.txt", ["a\r", "b\r"]));
+    const w = walk(sb({ "f.txt": Buffer.from([0xff, 0x0a]) }), "f.txt", "f.txt");
+    expect(w.node).toEqual(fileOf("f.txt", ["\uFFFD"]));
+    expect(w.raw.equals(Buffer.concat([Buffer.from("f.txt\n"), Buffer.from([0xff, 0x0a])]))).toBe(true);
+  });
+
+  it("marqueurs : fichier illisible, fichier de sortie ; fichier spécial sans contenu", () => {
+    const dir = sb({ "d/a.txt": "a\n" });
+    execFileSync("mkfifo", [path.join(dir, "d/pipe")]);
+    expect(nodeOf(dir, "d", "d", path.join(dir, "d/a.txt"))).toEqual({ kind: "dir", name: "d", children: [fileOf("a.txt", [], "output file"), fileOf("pipe", [])] });
+    if (process.geteuid?.() === 0) return;
+    const d2 = sb({ "f.txt": "x\n", "d/b.txt": "b\n" });
+    fs.chmodSync(path.join(d2, "f.txt"), 0o000);
+    fs.chmodSync(path.join(d2, "d/b.txt"), 0o000);
+    try {
+      expect(nodeOf(d2, "f.txt", "f.txt")).toEqual(fileOf("f.txt", [], "unreadable"));
+      expect(nodeOf(d2, "d", "d")).toEqual({ kind: "dir", name: "d", children: [fileOf("b.txt", [], "unreadable")] });
+    } finally {
+      fs.chmodSync(path.join(d2, "f.txt"), 0o644);
+      fs.chmodSync(path.join(d2, "d/b.txt"), 0o644);
+    }
+  });
+});
+
+describe("walkTree : structure d'un dossier", () => {
+  it("dossiers imbriqués, liens (jamais suivis), dossier vide, ordre par octets", () => {
+    const dir = sb({ "d/b.txt": "b\n", "d/a/deep.txt": "deep\n", "d/Z.txt": "Z\n", "d/e/.keep": "" }, (r) => {
+      fs.symlinkSync("b.txt", path.join(r, "d/link"));
+      fs.mkdirSync(path.join(r, "d/vide"));
+    });
+    expect(nodeOf(dir, "d", "d")).toEqual({
+      kind: "dir",
+      name: "d",
+      children: [
+        fileOf("Z.txt", ["Z"]),
+        { kind: "dir", name: "a", children: [fileOf("deep.txt", ["deep"])] },
+        fileOf("b.txt", ["b"]),
+        { kind: "dir", name: "e", children: [fileOf(".keep", [])] },
+        { kind: "link", name: "link", target: "b.txt" },
+        { kind: "dir", name: "vide", children: [] },
+      ],
+    });
+  });
+
+  it("racine lien ; racine dossier illisible : aucun enfant", () => {
+    const dir = sb({ "t.txt": "t\n" }, (r) => fs.symlinkSync("t.txt", path.join(r, "ln")));
+    expect(nodeOf(dir, "ln", "ln")).toEqual({ kind: "link", name: "ln", target: "t.txt" });
+    if (process.geteuid?.() === 0) return;
+    const d2 = sb({ "locked/a.txt": "a\n" });
+    fs.chmodSync(path.join(d2, "locked"), 0o000);
+    try {
+      expect(nodeOf(d2, "locked", "locked")).toEqual({ kind: "dir", name: "locked", children: [] });
+    } finally {
+      fs.chmodSync(path.join(d2, "locked"), 0o755);
+    }
+  });
+
+  it("surcouche mémoire : un fichier créé virtuellement apparaît avec son contenu", () => {
+    const dir = sb({ "d/keep.txt": "old\n" });
+    const ws = wsOf(dir);
+    ws.write("d/gen/new.txt", Buffer.from("new\n"));
+    ws.write("d/keep.txt", Buffer.from("changed\n"));
+    expect(walkTree(ws, "d", "d", null).node).toEqual({
+      kind: "dir",
+      name: "d",
+      children: [{ kind: "dir", name: "gen", children: [fileOf("new.txt", ["new"])] }, fileOf("keep.txt", ["changed"])],
+    });
+  });
+
+  it("racine introuvable : not_found", () => {
+    expect(() => walk(sb({}), "nope", "nope")).toThrow(/introuvable/);
+  });
+});
+
+describe("treeText : le texte reconstruit depuis la structure", () => {
+  const fixture = () =>
+    sb(
+      {
+        "d/a.txt": "un\ndeux\n",
+        "d/sans-fin.txt": "pas de newline final",
+        "d/vide.txt": "",
+        "d/lignes-vides.txt": "\n\nfin\n",
+        "d/sub/deep/x.ts": "export const x = 1;\n",
+        "d/sub/y.md": "# titre\n",
+        "d/élé ment.txt": "unicode\n",
+        // un fichier dont le contenu ressemble à un arbre
+        "d/faux-arbre.md": "├── faux\n└── autre\n│   -> fleche\n[unreadable]\n-> cible\n",
+      },
+      (r) => {
+        fs.symlinkSync("a.txt", path.join(r, "d/lien"));
+        fs.mkdirSync(path.join(r, "d/dossier-vide"));
+      },
+    );
+
+  it("égal à la sortie brute pour chaque racine (dossier, sous-dossier, fichier, lien)", () => {
+    const dir = fixture();
+    for (const [label, rel] of [["d", "d"], ["d/sub", "d/sub"], ["d/a.txt", "d/a.txt"], ["d/lien", "d/lien"], ["d/faux-arbre.md", "d/faux-arbre.md"], ["d/vide.txt", "d/vide.txt"]]) {
+      const { raw, node } = walk(dir, label, rel);
+      expect(treeText(node), label).toBe(raw.toString("utf8"));
+    }
+  });
+
+  it("avec un fichier de sortie (qui apparaît dans l'arbre, marqué)", () => {
+    const dir = fixture();
+    const out = path.join(dir, "d/out.txt");
+    const { raw, node } = walk(dir, "d", "d", out);
+    expect(treeText(node)).toBe(raw.toString("utf8"));
+    expect(treeText(node)).toContain("├── out.txt\n│   [output file]");
   });
 });

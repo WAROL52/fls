@@ -23,8 +23,9 @@ import { DIRECTIVES, SPEC_BY_NAME } from "./directive/index.ts";
 import { ERROR_CODES, FlsError, syntaxError, USAGE_CODES } from "./errors.ts";
 import { loadIgnore } from "./paths.ts";
 import { blockLines, quote, splitLines, tokenize } from "./text.ts";
-import { colorizeError, colorizeQuickTree, resolveTargets, truncate as safeAnsiTruncate } from "./color.ts";
-import { renderTree, treeRel } from "./tree.ts";
+import { numberArg } from "./args.ts";
+import { colorizeError, colorPlan } from "./color.ts";
+import { treeRel, treeText, walkTree, type TreeNode } from "./tree.ts";
 import type {
   Args,
   Clipboard,
@@ -34,22 +35,22 @@ import type {
   JournalEntry,
   Op,
   Pending,
+  Content,
   Report,
   RunMeta,
   Runner,
-  Snapshot,
   Spec,
   Token,
 } from "./types.ts";
 import { renderPlain } from "./report/plain.ts";
-import { decodeSnapshot, encodeSnapshot } from "./report/snapshot.ts";
 import { textBody, type Entry, type ReportDoc } from "./report/segments.ts";
-import { renderStyled } from "./report/styled.ts";
+import { loadLast } from "./last.ts";
+import { deliver, destinationsFor } from "./output.ts";
+import { VERSION } from "./version.ts";
 import { sha1, Workspace } from "./workspace.ts";
 
-export const VERSION = "1.2.0";
+export { VERSION };
 const DEFAULT_MAX_SIZE = 1_048_576;
-const DEFAULT_MAX_OUTPUT = 200_000;
 
 // ───────────────────────────── Parseur de script ─────────────────────────────
 
@@ -262,45 +263,16 @@ export async function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean)
   const doc: ReportDoc = { header, entries: results, footer };
   const text = renderPlain(doc);
   if (journaled) writeJournal(io, ws, id, now, pending, serialize(ops), text);
-  return { text, doc, code: results.some((r) => r.status === "FAIL") ? 1 : 0, snapshot: { kind: "report", doc } };
+  return { text, content: { kind: "report", doc }, remember: true, code: results.some((r) => r.status === "FAIL") ? 1 : 0 };
 }
 
 // ───────────────────────────── Dernière sortie : mémorisation et `fls last` ─────────────────────────────
 
-const lastFile = (io: Io): string | null => (io.cacheDir === undefined ? null : path.join(io.cacheDir, "last.json"));
-
-/** Mémorise la sortie non colorée ; un échec d'écriture (cache illisible, disque plein…) n'est jamais fatal. */
-export function saveLast(io: Io, snapshot: Snapshot): void {
-  const file = lastFile(io);
-  if (file === null) return;
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ ...encodeSnapshot(snapshot), version: VERSION, date: io.now().toISOString(), cwd: io.cwd }));
-  } catch {
-    // la mémorisation est un confort
-  }
-}
-
-export function loadLast(io: Io): Snapshot {
-  const file = lastFile(io);
-  const none = new FlsError("no_last_output", "aucune sortie mémorisée : lance d'abord une lecture ou un script");
-  if (file === null || !fs.existsSync(file)) throw none;
-  try {
-    const snapshot = decodeSnapshot(JSON.parse(fs.readFileSync(file, "utf8")));
-    if (snapshot !== null) return snapshot;
-  } catch {
-    // fichier corrompu
-  }
-  // copie d'un autre format (ex. 1.2.0) ou illisible : même message que « rien de mémorisé »
-  throw none;
-}
-
 /** Réaffiche la dernière sortie (sans rien réexécuter), recolorée et repliée à la largeur actuelle du terminal. */
-async function cmdLast(args: Args, io: Io): Promise<Report> {
+async function cmdLast(_args: Args, io: Io): Promise<Report> {
   const snap = loadLast(io);
-  if (snap.kind === "report") return { text: renderPlain(snap.doc), doc: snap.doc, code: 0 };
-  const roots = snap.roots.map((r) => (r === null ? null : { p: r.p, label: r.label, raw: Buffer.from(r.raw, "utf8") }));
-  return finishTree(args, io, new Workspace(io.cwd, DEFAULT_MAX_SIZE), roots, 0);
+  if (snap.kind === "report") return { text: renderPlain(snap.doc), content: snap, code: 0 };
+  return treeReport(snap.roots.map((r) => (r === null ? null : { raw: Buffer.from(treeText(r), "utf8"), node: r })), 0);
 }
 
 // ───────────────────────────── Journal : log et undo ─────────────────────────────
@@ -358,7 +330,7 @@ async function cmdUndo(args: Args, io: Io): Promise<Report> {
   };
   const now = io.now();
   const doc: ReportDoc = { header: `fls ${VERSION} | undo | ${io.cwd} | ${now.toISOString()}`, entries: [entry], footer: ["Résumé : 1 OK, 0 FAIL, 0 SKIP"] };
-  return { text: renderPlain(doc), doc, code: 0 };
+  return { text: renderPlain(doc), content: { kind: "report", doc }, code: 0 };
 }
 
 async function cmdLog(args: Args, io: Io): Promise<Report> {
@@ -490,7 +462,7 @@ async function cmdInit(_args: Args, io: Io): Promise<Report> {
     { status: "OK", kind: "INIT", title: `.gitignore (${has ? "déjà à jour" : "mis à jour"})`, body: [], code: "" },
   ];
   const doc: ReportDoc = { header: `fls ${VERSION} | init | ${io.cwd} | ${io.now().toISOString()}`, entries, footer: ["Résumé : 2 OK, 0 FAIL, 0 SKIP"] };
-  return { text: renderPlain(doc), doc, code: 0 };
+  return { text: renderPlain(doc), content: { kind: "report", doc }, code: 0 };
 }
 
 // ───────────────────────────── Presse-papiers ─────────────────────────────
@@ -579,14 +551,6 @@ export function parseArgs(argv: string[]): Args {
   return args;
 }
 
-function numberArg(args: Args, name: string, fallback: number): number {
-  const raw = args.values.get(name);
-  if (raw === undefined) return fallback;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1) throw new FlsError("usage_error", `--${name} attend un entier >= 1 (reçu : ${raw})`);
-  return n;
-}
-
 function scriptText(args: Args, io: Io): string {
   const file = args.values.get("file");
   if (file !== undefined) return fs.readFileSync(path.resolve(io.cwd, file), "utf8");
@@ -625,12 +589,12 @@ async function cmdQuickTree(args: Args, io: Io): Promise<Report> {
   const output = outputRaw === undefined ? null : path.resolve(io.cwd, outputRaw);
   if (output !== null) fs.writeFileSync(output, "");
   const ws = new Workspace(io.cwd, DEFAULT_MAX_SIZE);
-  const rendered: Array<{ p: string; label: string; raw: Buffer } | null> = [];
+  const rendered: TreeRoot[] = [];
   let code = 0;
   for (const p of paths) {
     const label = p === "" ? "." : p;
     try {
-      rendered.push({ p, label, raw: renderTree(ws, label, treeRel(p), output) });
+      rendered.push(walkTree(ws, label, treeRel(p), output));
     } catch (e) {
       code = 1;
       const msg = `fls : ${[(e as FlsError).code, (e as Error).message].filter(Boolean).join(" : ")}`;
@@ -638,31 +602,16 @@ async function cmdQuickTree(args: Args, io: Io): Promise<Report> {
       rendered.push(null);
     }
   }
-  const snapshot: Snapshot = { kind: "tree", roots: rendered.map((r) => (r === null ? null : { p: r.p, label: r.label, raw: r.raw.toString("utf8") })) };
-  return { ...(await finishTree(args, io, ws, rendered, code)), snapshot };
+  return { ...treeReport(rendered, code), remember: true };
 }
 
-type TreeRoot = { p: string; label: string; raw: Buffer } | null;
+type TreeRoot = { raw: Buffer; node: TreeNode } | null;
 
-/** Assemble la sortie d'une lecture `--tree` : brute, ou colorée et repliée selon le terminal. */
-async function finishTree(args: Args, io: Io, ws: Workspace, rendered: TreeRoot[], code: number): Promise<Report> {
-  const plain = Buffer.concat(rendered.map((r, i) => (i > 0 ? Buffer.concat([Buffer.from("\n"), r?.raw ?? Buffer.alloc(0)]) : (r?.raw ?? Buffer.alloc(0))))).toString("utf8");
-  const targets = resolveTargets(args, io);
-  const wantColor = targets.stdout || targets.file || targets.clip;
-  if (!wantColor) return { text: plain, raw: Buffer.concat(rendered.map((r, i) => (i > 0 ? Buffer.concat([Buffer.from("\n"), r?.raw ?? Buffer.alloc(0)]) : (r?.raw ?? Buffer.alloc(0))))), code };
-  const coloredRoots: string[] = [];
-  for (const r of rendered) {
-    if (r === null) { coloredRoots.push(""); continue; }
-    const chunk = r.raw.toString("utf8");
-    /* v8 ignore start */
-    try {
-      coloredRoots.push(await colorizeQuickTree(chunk, ws, treeRel(r.p), r.label, targets));
-    } catch {
-      coloredRoots.push(chunk);
-    }
-    /* v8 ignore stop */
-  }
-  return { text: coloredRoots.join("\n"), preColored: true, code };
+/** Rapport d'une lecture `--tree` : texte brut, octets exacts et racines en donnée (rendu stylé par `deliver`). */
+function treeReport(rendered: TreeRoot[], code: number): Report {
+  const raw = Buffer.concat(rendered.map((r, i) => (i > 0 ? Buffer.concat([Buffer.from("\n"), r?.raw ?? Buffer.alloc(0)]) : (r?.raw ?? Buffer.alloc(0)))));
+  const content: Content = { kind: "tree", roots: rendered.map((r) => (r === null ? null : r.node)) };
+  return { text: raw.toString("utf8"), raw, content, code };
 }
 
 const SUBCOMMANDS: Record<string, (args: Args, io: Io) => Promise<Report>> = {
@@ -689,65 +638,18 @@ export async function route(args: Args, io: Io): Promise<Report> {
   return cmdRun(args, io);
 }
 
-function withTruncation(text: string, limit: number, color: boolean): string {
-  if (text.length <= limit) return text;
-  if (!color) return `${text.slice(0, limit)}\n[rapport tronqué : ${text.length - limit} caractères omis ; relance avec --max-output-chars]\n`;
-  const cut = safeAnsiTruncate(text, limit);
-  return `${cut.text}\n[rapport tronqué : ${text.length - cut.text.length} caractères omis ; relance avec --max-output-chars]\n`;
-}
-
-export async function emit(args: Args, io: Io, report: Report): Promise<void> {
-  const targets = resolveTargets(args, io);
-  // Lecture brute `--tree` (colorée ou non) : pas de limite par défaut, sinon la coupe tombe au milieu
-  // de l'arborescence et masque les dossiers suivants (les codes ANSI comptent dans la taille).
-  const rawTree = report.raw !== undefined || report.preColored === true;
-  const limit = numberArg(args, "max-output-chars", rawTree ? Infinity : DEFAULT_MAX_OUTPUT);
-  const plainBase = report.text;
-  const preColored = report.preColored === true;
-  // Seul un Rapport en donnée (lectures et scripts) a un rendu stylé ; les autres sorties (aide, log,
-  // expand…) sont du texte brut.
-  const doc = report.doc;
-  const stdoutColored = doc !== undefined && targets.stdout;
-  const fileColored = doc !== undefined && targets.file;
-  const clipColored = doc !== undefined && targets.clip;
-
-  const coloredBase = preColored ? plainBase : (doc !== undefined && (stdoutColored || fileColored || clipColored) ? await renderStyled(doc, targets) : null);
-
-  const useColoredStdout = preColored ? targets.stdout : stdoutColored;
-  const useColoredFile = preColored ? targets.file : fileColored;
-  const useColoredClip = preColored ? targets.clip : clipColored;
-
-  const outShown: string | Buffer = useColoredStdout
-    ? withTruncation(coloredBase as string, limit, true)
-    : (plainBase.length > limit
-      ? withTruncation(plainBase, limit, false)
-      : (report.raw ?? plainBase));
-  const output = args.values.get("output");
-  if (output !== undefined) {
-    const fileShown = useColoredFile ? withTruncation(coloredBase as string, limit, true) : (plainBase.length > limit ? withTruncation(plainBase, limit, false) : plainBase);
-    fs.writeFileSync(path.resolve(io.cwd, output), fileShown);
-  } else {
-    io.out(outShown);
-  }
-  if (args.flags.has("clip") || args.flags.has("clip-out")) {
-    const clipShown = useColoredClip ? withTruncation(coloredBase as string, limit, true) : (plainBase.length > limit ? withTruncation(plainBase, limit, false) : plainBase);
-    io.clipboard.write(clipShown);
-  }
-  if (report.snapshot !== undefined) saveLast(io, report.snapshot);
-}
-
 export async function main(argv: string[], io: Io): Promise<number> {
   try {
     const args = parseArgs(argv);
     const report = await route(args, io);
-    await emit(args, io, report);
+    await deliver(report, destinationsFor(args, io), io);
     return report.code;
   } catch (e) {
     let msg = `fls : ${[(e as FlsError).code, (e as Error).message].filter(Boolean).join(" : ")}`;
     try {
       const args = parseArgs(argv);
-      const t = resolveTargets(args, io);
-      if (t.stderr) msg = colorizeError(msg, t);
+      const plan = colorPlan(args, io);
+      if (plan.stderr) msg = colorizeError(msg, plan);
     } catch {
       // ignore color failure on error path
     }
@@ -844,4 +746,5 @@ export type {
   Spec,
   Token,
 } from "./types.ts";
+export { loadLast, saveLast } from "./last.ts";
 export { Workspace } from "./workspace.ts";

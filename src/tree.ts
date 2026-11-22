@@ -9,7 +9,30 @@ import { joinRel } from "./text.ts";
 import type { Workspace } from "./workspace.ts";
 
 const NL = Buffer.from("\n");
+const EMPTY = Buffer.alloc(0);
 const utf8 = (s: string): Buffer => Buffer.from(s, "utf8");
+
+// ───────────────────────────── Structure d'un arbre ─────────────────────────────
+
+export type TreeNote = "output file" | "unreadable";
+
+/**
+ * Un arbre lu, en donnée : de quoi produire la sortie brute (octets exacts), le rendu stylé et la
+ * copie de la Dernière sortie sans jamais reparser un texte. `name` est le nom affiché (le libellé
+ * donné par l'utilisateur pour la racine). Les lignes d'un fichier sont décodées en UTF-8 (NUL retirés).
+ */
+export type TreeNode =
+  | { kind: "dir"; name: string; children: TreeNode[] }
+  | { kind: "file"; name: string; lines: string[]; note?: TreeNote }
+  | { kind: "link"; name: string; target: string };
+
+// Glyphes de l'arbre : un seul endroit pour les connaître.
+const BRANCH = "├── ";
+const LAST = "└── ";
+const BAR = "│   ";
+const GAP = "    ";
+export const branchOf = (last: boolean): string => (last ? LAST : BRANCH);
+export const indentOf = (prefix: string, last: boolean): string => prefix + (last ? GAP : BAR);
 
 /** Validation stricte du mode tree : relatifs uniquement, aucun segment `..`. */
 export function treeRel(p: string): string {
@@ -65,69 +88,128 @@ function sortedNames(ws: Workspace, rel: string, output: string | null): string[
   return names.sort((a, b) => Buffer.compare(utf8(a), utf8(b)));
 }
 
-/** Lignes du contenu, chacune préfixée ; NUL retirés ; newline final ajoutée si absente. */
-function contentParts(buf: Buffer, prefix: string): Buffer[] {
-  let data = buf;
-  if (data.includes(0)) {
-    const clean = Buffer.allocUnsafe(data.length);
-    let n = 0;
-    for (const b of data) if (b !== 0) clean[n++] = b;
-    data = clean.subarray(0, n);
-  }
+/** Contenu d'un fichier tel que treecat l'affiche : NUL retirés. */
+const withoutNul = (buf: Buffer): Buffer => {
+  if (!buf.includes(0)) return buf;
+  const clean = Buffer.allocUnsafe(buf.length);
+  let n = 0;
+  for (const b of buf) if (b !== 0) clean[n++] = b;
+  return clean.subarray(0, n);
+};
+
+/** Lignes du contenu, sans retour à la ligne ; un newline final ne crée pas de ligne vide. */
+function slicesOf(data: Buffer): Buffer[] {
   if (data.length === 0) return [];
-  const p = utf8(prefix);
-  const parts: Buffer[] = [];
+  const out: Buffer[] = [];
   let start = 0;
   for (;;) {
     const nl = data.indexOf(10, start);
     if (nl === -1) {
-      parts.push(p, data.subarray(start), NL);
-      return parts;
+      out.push(data.subarray(start));
+      return out;
     }
-    parts.push(p, data.subarray(start, nl), NL);
+    out.push(data.subarray(start, nl));
     start = nl + 1;
-    if (start === data.length) return parts;
+    if (start === data.length) return out;
   }
 }
 
-function fileBody(ws: Workspace, rel: string, abs: string, prefix: string, output: string | null): Buffer[] {
-  if (isOutput(abs, output)) return [utf8(`${prefix}[output file]\n`)];
+/** Ce qu'un fichier montre : son contenu, ou un marqueur (`[output file]`, `[unreadable]`). */
+interface FileView {
+  note?: TreeNote;
+  data: Buffer;
+}
+
+function viewOf(ws: Workspace, rel: string, abs: string, output: string | null): FileView {
+  if (isOutput(abs, output)) return { note: "output file", data: EMPTY };
   const entry = ws.changes.get(rel);
   const virtual = entry !== undefined && entry.data !== null;
   const canRead = virtual || readable(abs);
-  if ((virtual || regular(abs)) && canRead) return contentParts(ws.get(rel), prefix);
-  if (!canRead) return [utf8(`${prefix}[unreadable]\n`)];
-  return [];
+  if ((virtual || regular(abs)) && canRead) return { data: withoutNul(ws.get(rel)) };
+  if (!canRead) return { note: "unreadable", data: EMPTY };
+  return { data: EMPTY };
 }
 
-function walk(ws: Workspace, rel: string, prefix: string, output: string | null, parts: Buffer[]): void {
+/** Octets du contenu, chaque ligne préfixée (newline final ajoutée si absente). */
+const bytesOf = (v: FileView, prefix: string): Buffer[] =>
+  v.note !== undefined ? [utf8(`${prefix}[${v.note}]\n`)] : slicesOf(v.data).flatMap((s) => [utf8(prefix), s, NL]);
+
+const fileNode = (name: string, v: FileView): TreeNode => ({
+  kind: "file",
+  name,
+  lines: slicesOf(v.data).map((s) => s.toString("utf8")),
+  ...(v.note === undefined ? {} : { note: v.note }),
+});
+
+function walk(ws: Workspace, rel: string, prefix: string, output: string | null, parts: Buffer[]): TreeNode[] {
   const names = sortedNames(ws, rel, output);
-  names.forEach((name, i) => {
+  return names.map((name, i): TreeNode => {
     const child = joinRel(rel, name);
     const last = i === names.length - 1;
-    const next = prefix + (last ? "    " : "│   ");
-    parts.push(utf8(`${prefix}${last ? "└── " : "├── "}${name}\n`));
+    const next = indentOf(prefix, last);
+    parts.push(utf8(`${prefix}${branchOf(last)}${name}\n`));
     const kind = ws.kind(child);
     const abs = path.join(ws.root, child);
-    if (kind === "dir") walk(ws, child, next, output, parts);
-    else if (kind === "link") parts.push(utf8(`${next}-> ${ws.linkTarget(child)}\n`));
-    else if (kind === "file" || isOutput(abs, output)) parts.push(...fileBody(ws, child, abs, next, output));
+    if (kind === "dir") return { kind: "dir", name, children: walk(ws, child, next, output, parts) };
+    if (kind === "link") {
+      const target = ws.linkTarget(child);
+      parts.push(utf8(`${next}-> ${target}\n`));
+      return { kind: "link", name, target };
+    }
+    if (kind === "file" || isOutput(abs, output)) {
+      const view = viewOf(ws, child, abs, output);
+      parts.push(...bytesOf(view, next));
+      return fileNode(name, view);
+    }
+    return { kind: "file", name, lines: [] };
   });
 }
 
-/** Rend une racine (fichier, dossier ou lien) en octets, façon treecat. */
-export function renderTree(ws: Workspace, label: string, rel: string, output: string | null): Buffer {
+/** Lit une racine (fichier, dossier ou lien) : les octets exacts façon treecat, et la structure. */
+export function walkTree(ws: Workspace, label: string, rel: string, output: string | null): { raw: Buffer; node: TreeNode } {
   resolveParent(ws, rel);
   const kind = ws.kind(rel);
   if (kind === null) throw new FlsError("not_found", `introuvable : ${label}`);
   const abs = path.join(ws.root, rel);
   const parts: Buffer[] = [utf8(`${label}\n`)];
+  let node: TreeNode;
   if (kind === "dir") {
-    if (!fs.existsSync(abs) || readable(abs)) walk(ws, rel, "", output, parts);
+    const children = !fs.existsSync(abs) || readable(abs) ? walk(ws, rel, "", output, parts) : [];
+    node = { kind: "dir", name: label, children };
   } else if (kind === "link") {
-    parts.push(utf8(`-> ${ws.linkTarget(rel)}\n`));
+    const target = ws.linkTarget(rel);
+    parts.push(utf8(`-> ${target}\n`));
+    node = { kind: "link", name: label, target };
   } else {
-    parts.push(...fileBody(ws, rel, abs, "", output));
+    const view = viewOf(ws, rel, abs, output);
+    parts.push(...bytesOf(view, ""));
+    node = fileNode(label, view);
   }
-  return Buffer.concat(parts);
+  return { raw: Buffer.concat(parts), node };
+}
+
+/** Les octets d'une racine, façon treecat. */
+export const renderTree = (ws: Workspace, label: string, rel: string, output: string | null): Buffer => walkTree(ws, label, rel, output).raw;
+
+const fileLines = (n: Extract<TreeNode, { kind: "file" }>, prefix: string): string[] =>
+  n.note !== undefined ? [`${prefix}[${n.note}]`] : n.lines.map((l) => prefix + l);
+
+function layout(nodes: TreeNode[], prefix: string, out: string[]): void {
+  nodes.forEach((n, i) => {
+    const last = i === nodes.length - 1;
+    const next = indentOf(prefix, last);
+    out.push(`${prefix}${branchOf(last)}${n.name}`);
+    if (n.kind === "dir") layout(n.children, next, out);
+    else if (n.kind === "link") out.push(`${next}-> ${n.target}`);
+    else out.push(...fileLines(n, next));
+  });
+}
+
+/** Le texte d'une racine reconstruit depuis la structure (pour `fls last`) : celui de `renderTree`, à l'UTF-8 près. */
+export function treeText(root: TreeNode): string {
+  const lines = [root.name];
+  if (root.kind === "dir") layout(root.children, "", lines);
+  else if (root.kind === "link") lines.push(`-> ${root.target}`);
+  else lines.push(...fileLines(root, ""));
+  return `${lines.join("\n")}\n`;
 }

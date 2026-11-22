@@ -26,6 +26,6 @@ Les directives renvoyaient un titre et un corps **en texte** ; le rendu coloré 
 
 - Un changement de format d'entrée se fait dans `report/` ; les directives n'ont plus à connaître le rendu.
 - Le rendu stylé se teste par sa structure, sans mock de module ni dépendance au texte ANSI.
-- Hors périmètre, volontairement : l'arbre `--tree` garde sa copie `{ kind: "tree" }` et `colorizeQuickTree` (candidat « un seul parcours d'arbre »), et `emit` garde sa logique par destination (candidat « livrer par destinations »).
+- Hors périmètre, volontairement : l'arbre `--tree` garde sa copie `{ kind: "tree" }` et `colorizeQuickTree` (candidat « un seul parcours d'arbre »), et `emit` garde sa logique par destination (candidat « livrer par destinations »). *(L'arbre a été traité par l'ADR-0005 ; la livraison par l'ADR-0004.)*
 - Les sorties sans entrées (aide, `log`, `expand`, `spec`) sont du texte brut : le rendu stylé ne les touche plus (l'ancien rendu ne faisait que griser leur première ligne).
 - Les en-têtes colorés ont désormais le même espacement qu'en brut (l'ancien rendu ajoutait deux espaces après le statut).
