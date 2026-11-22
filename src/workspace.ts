@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { FlsError } from "./errors.ts";
-import type { FileState, JournalEntry, Kind, Pending } from "./types.ts";
+import type { JournalEntry } from "./journal.ts";
+import type { FileState, Kind, Pending } from "./types.ts";
 
 const BINARY_SNIFF = 8000;
 const DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });

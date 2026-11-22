@@ -22,6 +22,8 @@
 
 **Rendu stylé** — Le Rapport pour un terminal : couleurs, gouttière, repli à la largeur.
 
+**Journal** — Lieu où les Runs sont conservés (script plat, rapport, sauvegardes) ; `log` le lit et `undo` s'en sert pour restaurer.
+
 **Run** — Exécution journalisée d'un script ayant produit au moins un changement effectif ; annulable avec `undo`.
 
 **Gouttière** — Colonne de numéros de ligne (`12 │ `) affichée devant le contenu d'un fichier en sortie colorée. Le numéro n'apparaît que sur la première ligne visuelle d'une ligne repliée.

@@ -117,20 +117,6 @@ export interface Pending {
   mode: number;
 }
 
-export interface JournalEntry {
-  path: string;
-  backup: string | null;
-  mode: number;
-  after: string | null;
-}
-
-export interface RunMeta {
-  id: string;
-  date: string;
-  undone: boolean;
-  files: JournalEntry[];
-}
-
 export interface Token {
   text: string;
   quoted: boolean;

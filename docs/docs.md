@@ -129,7 +129,7 @@ fls undo --run <id>                # annule un run précis
 fls undo --force                   # restaure même si les fichiers ont changé depuis
 ```
 
-Un run n'est journalisé (dans `.fls/runs/<id>/`) que s'il a produit au moins un changement effectif. `undo` refuse de restaurer si un fichier a été modifié depuis le run (`conflict`), sauf avec `--force`.
+Un run n'est journalisé (dans `.fls/runs/<id>/`) que s'il a produit au moins un changement effectif. Le Journal (`src/journal.ts`) possède ce format ; `undo` refuse de restaurer si un fichier a été modifié depuis le run (`conflict`), sauf avec `--force`.
 
 ## Le rapport
 

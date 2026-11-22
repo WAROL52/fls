@@ -32,22 +32,21 @@ import type {
   Ctx,
   Ignore,
   Io,
-  JournalEntry,
   Op,
   Pending,
   Content,
   Report,
-  RunMeta,
   Runner,
   Spec,
   Token,
 } from "./types.ts";
 import { renderPlain } from "./report/plain.ts";
 import { textBody, type Entry, type ReportDoc } from "./report/segments.ts";
+import { Journal } from "./journal.ts";
 import { loadLast } from "./last.ts";
 import { deliver, destinationsFor } from "./output.ts";
 import { VERSION } from "./version.ts";
-import { sha1, Workspace } from "./workspace.ts";
+import { Workspace } from "./workspace.ts";
 
 export { VERSION };
 const DEFAULT_MAX_SIZE = 1_048_576;
@@ -233,18 +232,6 @@ export async function execute(ops: Op[], ctx: Ctx): Promise<Entry[]> {
 
 const count = (results: Entry[], status: Entry["status"]): number => results.filter((r) => r.status === status).length;
 
-const runsDir = (cwd: string): string => path.join(cwd, ".fls", "runs");
-
-function writeJournal(io: Io, ws: Workspace, id: string, now: Date, pending: Pending[], flat: string, text: string): void {
-  const dir = path.join(runsDir(io.cwd), id);
-  const backupDir = path.join(dir, "backup");
-  fs.mkdirSync(backupDir, { recursive: true });
-  const meta: RunMeta = { id, date: now.toISOString(), undone: false, files: ws.apply(pending, backupDir) };
-  fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify(meta, null, 2));
-  fs.writeFileSync(path.join(dir, "script.fls"), flat);
-  fs.writeFileSync(path.join(dir, "report.txt"), text);
-}
-
 export async function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean): Promise<Report> {
   const ws = new Workspace(io.cwd, numberArg(args, "max-size", DEFAULT_MAX_SIZE));
   const out = args.values.get("output");
@@ -262,7 +249,7 @@ export async function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean)
   const header = `fls ${VERSION} | ${dry ? "dry-run" : `run ${id}`} | ${io.cwd} | ${now.toISOString()}`;
   const doc: ReportDoc = { header, entries: results, footer };
   const text = renderPlain(doc);
-  if (journaled) writeJournal(io, ws, id, now, pending, serialize(ops), text);
+  if (journaled) new Journal(io.cwd, DEFAULT_MAX_SIZE).record(ws, { id, now, pending, script: serialize(ops), report: text });
   return { text, content: { kind: "report", doc }, remember: true, code: results.some((r) => r.status === "FAIL") ? 1 : 0 };
 }
 
@@ -277,54 +264,12 @@ async function cmdLast(_args: Args, io: Io): Promise<Report> {
 
 // ───────────────────────────── Journal : log et undo ─────────────────────────────
 
-function listRuns(cwd: string): string[] {
-  return fs.existsSync(runsDir(cwd)) ? fs.readdirSync(runsDir(cwd)).sort() : [];
-}
-function readMeta(cwd: string, id: string): RunMeta {
-  const file = path.join(runsDir(cwd), id, "meta.json");
-  if (!/^[\w-]+$/.test(id) || !fs.existsSync(file)) throw new FlsError("run_not_found", `run introuvable : ${id}`);
-  return JSON.parse(fs.readFileSync(file, "utf8")) as RunMeta;
-}
-function latestRun(cwd: string): string {
-  const id = listRuns(cwd)
-    .reverse()
-    .find((r) => !readMeta(cwd, r).undone);
-  if (id === undefined) throw new FlsError("nothing_to_undo", "aucun run à annuler");
-  return id;
-}
-function restoreEntry(ws: Workspace, backupDir: string, f: JournalEntry): void {
-  const abs = ws.resolve(f.path);
-  if (f.backup === null) {
-    fs.rmSync(abs, { force: true });
-    return;
-  }
-  fs.mkdirSync(path.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, fs.readFileSync(path.join(backupDir, f.backup)));
-  fs.chmodSync(abs, f.mode);
-}
-
 async function cmdUndo(args: Args, io: Io): Promise<Report> {
-  const id = args.values.get("run") ?? latestRun(io.cwd);
-  const meta = readMeta(io.cwd, id);
-  if (meta.undone) throw new FlsError("already_undone", `le run ${id} est déjà annulé`);
-  const ws = new Workspace(io.cwd, DEFAULT_MAX_SIZE);
-  const conflicts = meta.files
-    .filter((f) => {
-      const current = ws.diskFile(f.path);
-      return (current === null ? null : sha1(current)) !== f.after;
-    })
-    .map((f) => f.path);
-  if (conflicts.length > 0 && !args.flags.has("force")) {
-    throw new FlsError("conflict", `fichiers modifiés depuis le run : ${conflicts.join(", ")} (--force pour restaurer quand même)`);
-  }
-  const backupDir = path.join(runsDir(io.cwd), id, "backup");
-  meta.files.forEach((f) => restoreEntry(ws, backupDir, f));
-  meta.undone = true;
-  fs.writeFileSync(path.join(runsDir(io.cwd), id, "meta.json"), JSON.stringify(meta, null, 2));
+  const meta = new Journal(io.cwd, DEFAULT_MAX_SIZE).undo(args.values.get("run"), args.flags.has("force"));
   const entry: Entry = {
     status: "OK",
     kind: "UNDO",
-    title: `${id} (${meta.files.length} fichier(s) restauré(s))`,
+    title: `${meta.id} (${meta.files.length} fichier(s) restauré(s))`,
     body: textBody(meta.files.map((f) => `    ${f.path}`).join("\n")),
     code: "",
   };
@@ -334,17 +279,14 @@ async function cmdUndo(args: Args, io: Io): Promise<Report> {
 }
 
 async function cmdLog(args: Args, io: Io): Promise<Report> {
+  const journal = new Journal(io.cwd, DEFAULT_MAX_SIZE);
   const id = args.values.get("run");
   if (id === undefined) {
-    const lines = listRuns(io.cwd).map((r) => {
-      const m = readMeta(io.cwd, r);
-      return `${m.id}  ${m.date}  ${m.files.length} fichier(s)${m.undone ? "  [annulé]" : ""}`;
-    });
+    const lines = journal.list().map((m) => `${m.id}  ${m.date}  ${m.files.length} fichier(s)${m.undone ? "  [annulé]" : ""}`);
     return { text: `${lines.length === 0 ? "Aucun run enregistré." : lines.join("\n")}\n`, code: 0 };
   }
-  readMeta(io.cwd, id);
-  const read = (f: string): string => fs.readFileSync(path.join(runsDir(io.cwd), id, f), "utf8");
-  return { text: `=== script plat (${id}) ===\n${read("script.fls")}\n=== rapport ===\n${read("report.txt")}`, code: 0 };
+  const { script, report } = journal.show(id);
+  return { text: `=== script plat (${id}) ===\n${script}\n=== rapport ===\n${report}`, code: 0 };
 }
 
 // ───────────────────────────── Aide : usage, spec, help, init ─────────────────────────────
@@ -736,15 +678,14 @@ export type {
   FileState,
   Ignore,
   Io,
-  JournalEntry,
   Kind,
   Op,
   Pending,
   Report,
-  RunMeta,
   Runner,
   Spec,
   Token,
 } from "./types.ts";
+export type { JournalEntry, RunMeta } from "./journal.ts";
 export { loadLast, saveLast } from "./last.ts";
 export { Workspace } from "./workspace.ts";
