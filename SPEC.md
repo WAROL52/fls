@@ -1,6 +1,6 @@
 # SPEC — fls v1
 
-Spécification du comportement de `fls.ts` (version `1.2.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
+Spécification du comportement de `fls.ts` (version `1.3.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
 
 Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lancement : `node fls.ts …` (ou un alias vers ce fichier).
 
@@ -205,10 +205,32 @@ Les dossiers parents sont créés au commit. Un dossier à la place du fichier :
 
 Fichiers uniquement en v1 (un dossier donne `is_directory`, un lien symbolique `symlink`). `@move` échoue (`already_exists`) si la destination existe, **conserve les permissions**, et crée les dossiers parents. Les dossiers laissés vides ne sont pas supprimés.
 
+### Nouveautés de 1.3.0
+
+#### `@copy <source> <destination>`
+
+Comme `@move` sans supprimer la source : fichiers uniquement, `already_exists` si la destination existe, **permissions conservées**, dossiers parents créés. Écriture (bloquée par un échec précédent).
+
+#### `@mkdir <dossier>`
+
+Crée le dossier et ses parents (comme `mkdir -p`), **même vide**. Un dossier déjà présent est un `OK` « existe déjà » sans effet : il ne produit pas de run. Un fichier à cet endroit ou en parent : `not_a_directory` ; un lien symbolique : `symlink`. Le dossier est visible dans la surcouche (`@tree`, `--tree`) dès sa création. Le Journal enregistre les dossiers réellement créés (`dirs` dans `meta.json`) ; `undo` les supprime du plus profond au plus haut **s'ils sont restés vides**, sinon il les conserve et le dit. Écriture.
+
+#### `@stat <chemin>`
+
+Lecture. Un fichier : `type`, `taille` (octets), `lignes` (seulement s'il est lisible comme texte), `droits` (`0644`), `sha1`. Un dossier : `type`, `éléments`. Un lien : `type : lien symbolique -> cible`. Pas de date de modification (le rapport doit être reproductible). Chemin absent : `not_found`. Il voit l'état simulé.
+
+#### `@history [chemin] [--limit N]`
+
+Lecture du Journal (jamais enregistrée comme run). Sans chemin : les runs, du plus récent au plus ancien, avec le nombre de fichiers et de dossiers ; avec un chemin : seulement ceux qui l'ont touché, avec l'action (`créé`, `modifié`, `supprimé`, `dossier créé`). Un fichier déplacé apparaît sous ses deux noms. Les runs annulés restent listés avec `(annulé)`. `--limit` : entier >= 1, défaut 10. Sans run : `OK`, « aucun run ».
+
+#### Vérifications `@expect_exists <chemin>`, `@expect_missing <chemin>`, `@expect_contains <fichier> "<texte>" [--regex] [--count N]`
+
+Constatent un fait sur l'état simulé (un `@expect_contains` après un `@edit` vérifie son résultat). Un échec est un `FAIL` de code `expectation_failed` dont le message donne le constat (`attendu : … ; trouvé : …`) ; **il bloque les écritures suivantes** (`SKIP`, code `skipped`) comme un échec d'écriture, mais les lectures continuent. Les écritures déjà appliquées **ne sont pas annulées** : `fls undo` revient en arrière. `@expect_contains` : au moins une occurrence, ou exactement `N` avec `--count` ; les occurrences sont toutes comptées dans le texte entier (deux sur la même ligne = deux) ; le message d'échec donne au plus 10 numéros de ligne. Un texte sur plusieurs lignes ne s'écrit qu'avec `--regex` (`\s`, `\n`), parce qu'une directive tient sur une ligne. Les erreurs de lecture gardent leur code (`not_found`, `binary_file`…). `@stat`, `@history` et les vérifications s'écrivent aussi en forme `#@` ; `@copy` et `@mkdir` non.
+
 ## 6. Sémantique d'exécution
 
 - **Surcouche en mémoire** : toutes les directives lisent et écrivent un état simulé au-dessus du disque. Un `@read` ou un `@tree` après une écriture voit le résultat ; un dossier créé virtuellement apparaît dans l'arbre.
-- **Politique d'échec** : un `FAIL` sur une directive d'**écriture** (`@edit`, `@create`, `@overwrite`, `@write`, `@append`, `@delete`, `@move`) fait passer les écritures suivantes en `SKIP` (code `skipped`) ; les lectures continuent. Un `FAIL` sur une lecture ne bloque rien.
+- **Politique d'échec** : un `FAIL` sur une directive d'**écriture** (`@edit`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`) ou sur une **vérification** (`@expect_*`) fait passer les écritures suivantes en `SKIP` (code `skipped`) ; les lectures continuent. Un `FAIL` sur une lecture ne bloque rien.
 - **Commit** (hors `--dry-run`) : seuls les changements **effectifs** sont écrits (un fichier recréé à l'identique, ou créé puis supprimé dans le même script, n'est pas un changement). Chaque fichier est écrit dans un fichier temporaire `<chemin>.fls-tmp` puis renommé (atomique), avec ses permissions d'origine (644 pour un nouveau fichier).
 - **Conservation** : fins de ligne, BOM et permissions sont préservés ; un fichier non UTF-8 valide est refusé (`not_utf8`), comme un binaire (octet nul dans les 8000 premiers octets : `binary_file`) ou un fichier de plus de `--max-size` octets (`too_large`).
 
@@ -221,7 +243,7 @@ Fichiers uniquement en v1 (un dossier donne `is_directory`, un lien symbolique `
 ## 8. Rapport
 
 ```
-fls 1.2.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
+fls 1.3.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
 
 [1] OK    TREE src
 …
@@ -229,7 +251,7 @@ fls 1.2.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:0
     bloc 1 : SEARCH introuvable dans src/x.ts (ligne la plus proche (l.42) : "…")
 
 [3] SKIP  CREATE a.ts : skipped
-    ignoré : une écriture précédente a échoué
+    ignoré : une écriture ou une vérification précédente a échoué
 
 Résumé : 1 OK, 1 FAIL, 1 SKIP
 Modifiés : src/user.ts, src/roles.ts
@@ -256,7 +278,7 @@ Un run n'est journalisé que s'il a produit au moins un changement effectif. Con
 
 | Fichier | Contenu |
 |---|---|
-| `meta.json` | `id`, `date`, `undone`, et pour chaque fichier touché : `path`, `backup` (nom du fichier de sauvegarde ou `null` s'il n'existait pas), `mode`, `after` (empreinte SHA-1 du contenu écrit, `null` si supprimé) |
+| `meta.json` | `id`, `date`, `undone`, `dirs` (dossiers créés par `@mkdir`, absent avant 1.3.0), et pour chaque fichier touché : `path`, `backup` (nom du fichier de sauvegarde ou `null` s'il n'existait pas), `mode`, `after` (empreinte SHA-1 du contenu écrit, `null` si supprimé) |
 | `script.fls` | script plat canonique |
 | `report.txt` | rapport complet |
 | `backup/<n>` | contenu d'origine de chaque fichier existant avant le run |
@@ -268,7 +290,9 @@ Un run n'est journalisé que s'il a produit au moins un changement effectif. Con
 3. vérifie, pour chaque fichier, que le contenu actuel correspond à `after` ; sinon `conflict` (liste des fichiers) et **rien n'est restauré**, sauf avec `--force` ;
 4. restaure les contenus et permissions d'origine, supprime les fichiers que le run avait créés, marque le run `undone`.
 
-Les dossiers créés par le run ne sont pas supprimés.
+5. retire les dossiers de `dirs`, du plus profond au plus haut, s'ils sont vides ; un dossier devenu non vide est conservé et signalé (`conservé : il n'est pas vide`).
+
+Un run qui ne fait que créer des dossiers est un run (`Modifiés : d/`).
 
 ## 10. Codes d'erreur et de sortie
 
@@ -287,7 +311,8 @@ Les dossiers créés par le run ne sont pas supprimés.
 | `symlink` | lien symbolique non géré |
 | `binary_file` / `too_large` / `not_utf8` | fichier non lisible comme texte |
 | `invalid_argument` | valeur d'argument ou d'option invalide |
-| `skipped` | écriture ignorée après un échec |
+| `skipped` | écriture ignorée après un échec d'écriture ou de vérification |
+| `expectation_failed` | une vérification `@expect_*` n'est pas satisfaite |
 | `run_not_found` / `already_undone` / `nothing_to_undo` / `conflict` | journal et `undo` |
 | `no_last_output` | `fls last` : aucune sortie mémorisée |
 | `clipboard_unavailable` | aucun outil de presse-papiers |
@@ -299,8 +324,8 @@ Premier outil qui réussit, dans l'ordre : `wl-paste` / `wl-copy`, `xclip -selec
 ## 12. Limites connues de la v1
 
 - Pas de repli sur les espaces de fin de ligne : la correspondance de SEARCH est exacte (aux fins de ligne CRLF/LF près).
-- `@delete` et `@move` ne gèrent pas les dossiers ; pas de globs ni de `--all`.
-- `undo` ne supprime pas les dossiers vides créés ; il ne protège que les fichiers touchés par le run.
+- `@delete`, `@move` et `@copy` ne gèrent pas les dossiers ; pas de globs ni de `--all`.
+- `undo` ne supprime que les dossiers créés par `@mkdir` et restés vides ; il ne protège que les fichiers touchés par le run.
 - Un chemin dont un parent est un fichier est traité comme absent en lecture et refusé en écriture (`not_a_directory`).
 - Pas de Windows natif (chemins POSIX uniquement).
 - Aucune syntaxe de programmation : la v2 produira, par une phase d'expansion préalable, le script plat décrit ici.
@@ -309,7 +334,7 @@ Premier outil qui réussit, dans l'ordre : `wl-paste` / `wl-copy`, `xclip -selec
 
 - **Entrées/sorties injectées** (`Io` : dossier courant, entrée standard, sorties, presse-papiers, horloge, identifiant) ; `main(argv, io)` renvoie le code de sortie. Le vrai `Io` n'est construit qu'au chargement du module, et le démarrage passe par `bootstrap(isEntry(...), start)`, entièrement testable.
 - **Tables** plutôt que chaînes de `if` : directives (`DIRECTIVES`, utilisées par le parseur, l'aide et la spec), sous-commandes, options globales, lecteurs/écrivains de blocs, vérifications d'écriture, outils de presse-papiers.
-- **Modules** : `src/fls.ts` (parseur, exécution, aide, CLI), `src/journal.ts` (le Journal : format de `.fls/runs/<id>/`, enregistrement, liste, relecture, annulation avec détection des conflits ; il renvoie des données, `fls.ts` construit les rapports de `log` et `undo`), `src/tree.ts` (lecture d'un arbre en **structure** `TreeNode` — dossiers, fichiers avec leurs lignes, liens — et sortie brute façon treecat produites par un seul parcours : `walkTree`, `treeText`) et `src/report/tree-styled.ts` (rendu stylé d'un `--tree`, qui parcourt la structure), `src/output.ts` (livraison d'une sortie à ses **destinations** : terminal, fichier de `--output`, presse-papiers ; chacune porte sa couleur, sa largeur et sa limite, et le Rapport n'est rendu qu'une fois par jeu d'options), `src/last.ts` (Dernière sortie), `src/args.ts`, `src/version.ts`, `src/style.ts` (le texte stylé comme donnée : spans, lignes, couleurs dégradées, palette, repli), `src/ansi.ts` (le seul sérialiseur ANSI, avec la limite de `--max-output-chars`), `src/highlight.ts` (coloration syntaxique Shiki, renvoie des spans), `src/report/` (le Rapport comme donnée : `segments.ts` types `Segment` / `Entry` / `ReportDoc`, `plain.ts` rendu brut, `styled.ts` rendu stylé en lignes stylées, `code-block.ts` gouttière et repli, `snapshot.ts` copie versionnée de la Dernière sortie), `src/directive/<nom>.ts` (une `Spec` par directive, assemblées par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
+- **Modules** : `src/fls.ts` (parseur, exécution, aide, CLI), `src/journal.ts` (le Journal : format de `.fls/runs/<id>/`, enregistrement, liste, relecture, annulation avec détection des conflits ; il renvoie des données, `fls.ts` construit les rapports de `log` et `undo`), `src/tree.ts` (lecture d'un arbre en **structure** `TreeNode` — dossiers, fichiers avec leurs lignes, liens — et sortie brute façon treecat produites par un seul parcours : `walkTree`, `treeText`) et `src/report/tree-styled.ts` (rendu stylé d'un `--tree`, qui parcourt la structure), `src/output.ts` (livraison d'une sortie à ses **destinations** : terminal, fichier de `--output`, presse-papiers ; chacune porte sa couleur, sa largeur et sa limite, et le Rapport n'est rendu qu'une fois par jeu d'options), `src/last.ts` (Dernière sortie), `src/args.ts`, `src/version.ts`, `src/style.ts` (le texte stylé comme donnée : spans, lignes, couleurs dégradées, palette, repli), `src/ansi.ts` (le seul sérialiseur ANSI, avec la limite de `--max-output-chars`), `src/highlight.ts` (coloration syntaxique Shiki, renvoie des spans), `src/report/` (le Rapport comme donnée : `segments.ts` types `Segment` / `Entry` / `ReportDoc`, `plain.ts` rendu brut, `styled.ts` rendu stylé en lignes stylées, `code-block.ts` gouttière et repli, `snapshot.ts` copie versionnée de la Dernière sortie), `src/directive/<nom>.ts` (une `Spec` par directive ; `expect.ts` en regroupe trois, assemblées par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
 - **`Workspace`** : surcouche en mémoire au-dessus du disque ; le dry-run et l'exécution réelle partagent tout le code, seul `apply` (commit) diffère.
 - **Syntaxe TypeScript effaçable uniquement** (ni `enum` ni propriétés de paramètre) : `node src/fls.ts` suffit.
 

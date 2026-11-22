@@ -1,26 +1,15 @@
-import { FlsError } from "../errors.ts";
 import { normalizeRel } from "../paths.ts";
 import { range, splitLines } from "../text.ts";
 import type { MatchRow } from "../report/segments.ts";
 import type { Ctx, Done, Op, Spec } from "../types.ts";
 import type { Workspace } from "../workspace.ts";
-import { collectFiles, directive, intOpt } from "./shared.ts";
-
-const escapeAll = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+import { collectFiles, compileRegex, directive, escapeAll, intOpt } from "./shared.ts";
 
 function tryText(ws: Workspace, rel: string): string | null {
   try {
     return ws.text(rel);
   } catch {
     return null;
-  }
-}
-
-function compileRegex(source: string, flags: string): RegExp {
-  try {
-    return new RegExp(source, flags);
-  } catch {
-    throw new FlsError("invalid_argument", `expression régulière invalide : ${source}`);
   }
 }
 

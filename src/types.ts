@@ -1,6 +1,7 @@
 // Types partagés par tous les modules de fls.
 
 import type { Highlighter } from "./highlight.ts";
+import type { Journal } from "./journal.ts";
 import type { ReportDoc, Segment } from "./report/segments.ts";
 import type { TreeNode } from "./tree.ts";
 import type { Workspace } from "./workspace.ts";
@@ -49,6 +50,8 @@ export type Ignore = (rel: string, isDir: boolean) => boolean;
 export interface Ctx {
   ws: Workspace;
   ignore: Ignore;
+  /** Le Journal du dossier courant (lu par `@history`). */
+  journal: Journal;
   /** Chemin absolu de --output, pour marquer `[output file]` en mode tree. */
   output?: string | null;
 }
@@ -99,6 +102,8 @@ export interface Spec {
   positional: [number, number];
   block: "none" | "edit" | "content";
   writes: boolean;
+  /** Vérification : un échec bloque (SKIP) les écritures suivantes, sans rien annuler. */
+  guard: boolean;
   optionDocs: string[];
   examples: string[];
   run: (ctx: Ctx, op: Op) => Done | Promise<Done>;

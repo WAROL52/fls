@@ -15,6 +15,16 @@ export function intOpt(op: Op, name: string, fallback: number): number {
   return n;
 }
 
+export const escapeAll = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export function compileRegex(source: string, flags: string): RegExp {
+  try {
+    return new RegExp(source, flags);
+  } catch {
+    throw new FlsError("invalid_argument", `expression régulière invalide : ${source}`);
+  }
+}
+
 export interface Child {
   name: string;
   rel: string;
@@ -77,6 +87,7 @@ export const directive = (
   positional: [1, 1],
   block: "none",
   writes: false,
+  guard: false,
   optionDocs: [],
   ...d,
 });

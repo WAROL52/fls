@@ -27,6 +27,8 @@ export class Workspace {
   root: string;
   maxSize: number;
   changes: Map<string, FileState> = new Map();
+  /** Dossiers créés par `@mkdir` (y compris vides), au-dessus du disque. */
+  dirs: Set<string> = new Set();
   private realRoot: string;
 
   constructor(root: string, maxSize: number) {
@@ -51,7 +53,7 @@ export class Workspace {
     const e = this.changes.get(rel);
     if (e !== undefined) return e.data === null ? null : "file";
     const st = lstatSafe(path.join(this.root, rel));
-    if (st === undefined) return this.hasVirtualChild(rel) ? "dir" : null;
+    if (st === undefined) return this.dirs.has(rel) || this.hasVirtualChild(rel) ? "dir" : null;
     return st.isSymbolicLink() ? "link" : st.isDirectory() ? "dir" : "file";
   }
 
@@ -111,13 +113,34 @@ export class Workspace {
     this.changes.set(rel, { data: null, mode: 0o644 });
   }
 
-  move(from: string, to: string): void {
+  /** Crée le dossier (et ses parents) ; renvoie false s'il existe déjà. */
+  mkdir(rel: string): boolean {
+    const k = this.kind(rel);
+    if (k === "dir") return false;
+    if (k === "link") throw new FlsError("symlink", `${rel} est un lien symbolique (non suivi)`);
+    if (k === "file") throw new FlsError("not_a_directory", `${rel} est un fichier`);
+    for (let p = path.posix.dirname(rel); p !== "."; p = path.posix.dirname(p)) {
+      if (this.kind(p) === "file") throw new FlsError("not_a_directory", `${p} est un fichier`);
+    }
+    this.resolve(rel);
+    for (let p = rel; p !== "."; p = path.posix.dirname(p)) {
+      if (this.kind(p) === null) this.dirs.add(p);
+    }
+    return true;
+  }
+
+  /** Copie un fichier ; échoue si la destination existe (droits conservés). */
+  copy(from: string, to: string): void {
     this.requireFile(from);
     if (this.kind(to) !== null) throw new FlsError("already_exists", `${to} existe déjà`);
     const data = this.get(from);
     const mode = this.modeOf(from);
     this.write(to, data);
     (this.changes.get(to) as FileState).mode = mode;
+  }
+
+  move(from: string, to: string): void {
+    this.copy(from, to);
     this.remove(from);
   }
 
@@ -132,12 +155,20 @@ export class Workspace {
       if (e.data !== null) names.add(slash === -1 ? rest : rest.slice(0, slash));
       else if (slash === -1) names.delete(rest);
     }
+    for (const d of this.dirs) {
+      if (d.startsWith(prefix) && d !== rel) names.add(d.slice(prefix.length).split("/")[0]);
+    }
     return [...names].sort();
   }
 
   diskFile(rel: string): Buffer | null {
     const st = lstatSafe(path.join(this.root, rel));
     return st !== undefined && st.isFile() ? fs.readFileSync(this.resolve(rel)) : null;
+  }
+
+  /** Dossiers que le run créera réellement (absents du disque), parents avant enfants. */
+  newDirs(): string[] {
+    return [...this.dirs].filter((d) => lstatSafe(path.join(this.root, d)) === undefined).sort();
   }
 
   /** Changements réels (ceux qui laissent le disque différent de l'état simulé). */

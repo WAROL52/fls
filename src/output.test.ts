@@ -81,7 +81,7 @@ describe("destinationsFor", () => {
 
 describe("deliver", () => {
   const doc: ReportDoc = {
-    header: "fls 1.2.0 | run r1 | /x | 2026",
+    header: "fls 1.3.0 | run r1 | /x | 2026",
     entries: [{ status: "OK", kind: "READ", title: "a.ts (1 lignes)", code: "", body: [{ kind: "file", path: "a.ts", from: 1, total: 1, ranged: false, numbered: false, lines: ["const x = 1;"] }] }],
     footer: ["Résumé : 1 OK, 0 FAIL, 0 SKIP"],
   };

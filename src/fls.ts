@@ -139,6 +139,7 @@ function parseDirective(line: string, lineNo: number): Op {
 
 const CLIP_MARKER = /^\s*#{3,}\s*clip\s+(start|end)\s*#*\s*$/i;
 const HASH_DIRECTIVE = /^#@[A-Za-z]/;
+const HASH_NAME = /^#@([A-Za-z][A-Za-z_]*)/;
 
 /**
  * Zone utile d'un script collé : si au moins un `clip start` existe, seules les lignes entre
@@ -161,7 +162,7 @@ export function clipRegions(lines: string[]): string[] {
 
 /** `#@nom …` (collé à une lettre) devient `@nom …` ; réservé aux directives de lecture. */
 function unhash(trimmed: string, lineNo: number): string {
-  const name = /^#@([A-Za-z]+)/.exec(trimmed)?.[1] as string;
+  const name = HASH_NAME.exec(trimmed)?.[1] as string;
   const spec = SPEC_BY_NAME.get(name);
   if (spec === undefined) throw syntaxError(lineNo, `directive inconnue #@${name}`);
   if (spec.writes) throw syntaxError(lineNo, `#@${name} : les directives d'écriture exigent la forme @${name}`);
@@ -216,14 +217,14 @@ export async function execute(ops: Op[], ctx: Ctx): Promise<Entry[]> {
     const kind = op.name.toUpperCase();
     const title = op.args.map(quote).join(" ");
     if (blocked && spec.writes) {
-      out.push({ status: "SKIP", kind, title, body: textBody("    ignoré : une écriture précédente a échoué"), code: "skipped" });
+      out.push({ status: "SKIP", kind, title, body: textBody("    ignoré : une écriture ou une vérification précédente a échoué"), code: "skipped" });
       continue;
     }
     try {
       const done = await spec.run(ctx, op);
       out.push({ status: "OK", kind, title: done.title, body: done.body, code: "" });
     } catch (e) {
-      if (spec.writes) blocked = true;
+      if (spec.writes || spec.guard) blocked = true;
       out.push({ status: "FAIL", kind, title, body: textBody(`    ${(e as Error).message}`), code: String((e as FlsError).code) });
     }
   }
@@ -235,21 +236,22 @@ const count = (results: Entry[], status: Entry["status"]): number => results.fil
 export async function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean): Promise<Report> {
   const ws = new Workspace(io.cwd, numberArg(args, "max-size", DEFAULT_MAX_SIZE));
   const out = args.values.get("output");
-  const results = await execute(ops, { ws, ignore: loadIgnore(ws, args.ignore), output: out === undefined ? null : path.resolve(io.cwd, out) });
+  const journal = new Journal(io.cwd, DEFAULT_MAX_SIZE);
+  const results = await execute(ops, { ws, journal, ignore: loadIgnore(ws, args.ignore), output: out === undefined ? null : path.resolve(io.cwd, out) });
   const pending = ws.pending();
-  const paths = pending.map((p) => p.rel);
+  const paths = [...pending.map((p) => p.rel), ...ws.newDirs().map((d) => `${d}/`)];
   const now = io.now();
   const id = io.newId(now);
   const footer = [
     `Résumé : ${count(results, "OK")} OK, ${count(results, "FAIL")} FAIL, ${count(results, "SKIP")} SKIP`,
     `${dry ? "Modifierait" : "Modifiés"} : ${paths.length === 0 ? "aucun" : paths.join(", ")}`,
   ];
-  const journaled = !dry && pending.length > 0;
+  const journaled = !dry && paths.length > 0;
   if (journaled) footer.push("Annulable avec : fls undo");
   const header = `fls ${VERSION} | ${dry ? "dry-run" : `run ${id}`} | ${io.cwd} | ${now.toISOString()}`;
   const doc: ReportDoc = { header, entries: results, footer };
   const text = renderPlain(doc);
-  if (journaled) new Journal(io.cwd, DEFAULT_MAX_SIZE).record(ws, { id, now, pending, script: serialize(ops), report: text });
+  if (journaled) journal.record(ws, { id, now, pending, script: serialize(ops), report: text });
   return { text, content: { kind: "report", doc }, remember: true, code: results.some((r) => r.status === "FAIL") ? 1 : 0 };
 }
 
@@ -265,12 +267,18 @@ async function cmdLast(_args: Args, io: Io): Promise<Report> {
 // ───────────────────────────── Journal : log et undo ─────────────────────────────
 
 async function cmdUndo(args: Args, io: Io): Promise<Report> {
-  const meta = new Journal(io.cwd, DEFAULT_MAX_SIZE).undo(args.values.get("run"), args.flags.has("force"));
+  const { meta, removedDirs, keptDirs } = new Journal(io.cwd, DEFAULT_MAX_SIZE).undo(args.values.get("run"), args.flags.has("force"));
+  const dirsNote = removedDirs.length === 0 ? "" : `, ${removedDirs.length} dossier(s) supprimé(s)`;
+  const lines = [
+    ...meta.files.map((f) => `    ${f.path}`),
+    ...removedDirs.map((d) => `    ${d}/`),
+    ...keptDirs.map((d) => `    ${d}/ conservé : il n'est pas vide`),
+  ];
   const entry: Entry = {
     status: "OK",
     kind: "UNDO",
-    title: `${meta.id} (${meta.files.length} fichier(s) restauré(s))`,
-    body: textBody(meta.files.map((f) => `    ${f.path}`).join("\n")),
+    title: `${meta.id} (${meta.files.length} fichier(s) restauré(s)${dirsNote})`,
+    body: textBody(lines.join("\n")),
     code: "",
   };
   const now = io.now();
@@ -282,7 +290,7 @@ async function cmdLog(args: Args, io: Io): Promise<Report> {
   const journal = new Journal(io.cwd, DEFAULT_MAX_SIZE);
   const id = args.values.get("run");
   if (id === undefined) {
-    const lines = journal.list().map((m) => `${m.id}  ${m.date}  ${m.files.length} fichier(s)${m.undone ? "  [annulé]" : ""}`);
+    const lines = journal.list().map((m) => `${m.id}  ${m.date}  ${m.files.length} fichier(s)${m.dirs.length > 0 ? `, ${m.dirs.length} dossier(s)` : ""}${m.undone ? "  [annulé]" : ""}`);
     return { text: `${lines.length === 0 ? "Aucun run enregistré." : lines.join("\n")}\n`, code: 0 };
   }
   const { script, report } = journal.show(id);
@@ -358,7 +366,7 @@ const SPEC_INTRO = [
   "- chemins relatifs au dossier courant ; absolus, `..` et liens symboliques sortants sont refusés ;",
   "- --tree (global) applique @read --tree à tous les reads ; --tree seul en lecture rapide produit la sortie brute ;",
   "- toutes les directives voient l'état simulé : un @read après un @edit montre le résultat ;",
-  "- après un échec d'écriture, les écritures suivantes sont SKIP mais les lectures continuent ;",
+  "- après un échec d'écriture ou de vérification (@expect_*), les écritures suivantes sont SKIP mais les lectures continuent ;",
   "- chaque @edit est atomique (tous ses blocs passent ou aucun) ; les écritures réussies sont appliquées.",
   "",
   "Rapport : une entrée numérotée par directive (OK, FAIL ou SKIP), puis un résumé.",

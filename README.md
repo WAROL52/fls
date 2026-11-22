@@ -50,11 +50,29 @@ cd ~/DEV/projet && fls --clip
 
 ### Directives
 
-`@tree`, `@read`, `@grep`, `@note`, `@edit`, `@create`, `@overwrite`, `@write`, `@append`, `@delete`, `@move`. Détail : `fls help <directive>`, syntaxe complète : `fls spec` (et [SPEC.md](SPEC.md)).
+Lecture : `@tree`, `@read`, `@grep`, `@stat`, `@history`, `@note`. Écriture : `@edit`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`. Vérifications : `@expect_exists`, `@expect_missing`, `@expect_contains`. Détail : `fls help <directive>`, syntaxe complète : `fls spec` (et [SPEC.md](SPEC.md)).
+
+### Vérifier avant d'écrire
+
+Une vérification qui échoue fait ignorer les écritures suivantes (les lectures continuent) ; ce qui a déjà été écrit reste, et `fls undo` le défait :
+
+```
+@expect_exists src/user.ts
+@expect_contains src/user.ts "return { id, name }" --count 1
+@edit src/user.ts
+<<<<<<< SEARCH
+  return { id, name }
+=======
+  return { id, name, role: "member" }
+>>>>>>> REPLACE
+@expect_contains src/user.ts "role:" --count 1
+@history src/user.ts --limit 3
+```
 
 ### Sûreté
 
 - `--dry-run` simule sans rien écrire ; chaque `@edit` est atomique et son SEARCH doit être unique.
+- `@mkdir` crée des dossiers vides ; `undo` retire ceux qui sont restés vides.
 - `fls log` liste les runs, `fls undo [--run <id>] [--force]` annule ; le journal est dans `.fls/` (`fls init` le met dans `.gitignore`).
 - Chemins confinés au dossier courant ; liens symboliques, binaires et fichiers trop gros refusés.
 - Codes de sortie : `0` OK, `1` au moins un FAIL, `2` erreur de syntaxe ou d'usage.

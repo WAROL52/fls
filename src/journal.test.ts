@@ -58,7 +58,7 @@ describe("Journal", () => {
     write("a.txt", "ancien", 0o755);
     const j = new Journal(dir, 1e6);
     record(j, "r1");
-    const undone = j.undo(undefined, false);
+    const { meta: undone } = j.undo(undefined, false);
     expect(undone.id).toBe("r1");
     expect(undone.undone).toBe(true);
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("ancien");
@@ -75,7 +75,7 @@ describe("Journal", () => {
     record(j, "r1");
     fs.rmSync(path.join(dir, "a.txt"));
     fs.writeFileSync(path.join(dir, "a.txt"), "nouveau");
-    expect(j.undo("r1", false).id).toBe("r1");
+    expect(j.undo("r1", false).meta.id).toBe("r1");
   });
 
   it("refuse en cas de conflit, sauf --force", () => {
@@ -94,5 +94,58 @@ describe("Journal", () => {
     record(j, "r1");
     fs.rmSync(path.join(dir, "b/c.txt"));
     expect(code(() => j.undo("r1", false))).toBe("conflict");
+  });
+
+  it("journalise les dossiers créés ; undo retire ceux qui sont restés vides, laisse les autres", () => {
+    const j = new Journal(dir, 1e6);
+    const ws = new Workspace(dir, 1e6);
+    ws.mkdir("x/y");
+    ws.mkdir("z");
+    expect(ws.newDirs()).toEqual(["x", "x/y", "z"]);
+    j.record(ws, { id: "r1", now: new Date("2026-01-01T00:00:00Z"), pending: ws.pending(), script: "@mkdir x/y\n", report: "r\n" });
+    expect(j.list()[0]?.dirs).toEqual(["x", "x/y", "z"]);
+    expect(fs.statSync(path.join(dir, "x/y")).isDirectory()).toBe(true);
+    write("z/garde.txt", "à moi");
+    fs.rmSync(path.join(dir, "x/y"), { recursive: true });
+    const undone = j.undo("r1", false);
+    expect(undone.removedDirs).toEqual(["x"]); // x/y déjà disparu : ni retiré ni conservé
+    expect(undone.keptDirs).toEqual(["z"]);
+    expect(fs.existsSync(path.join(dir, "x"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "z/garde.txt"))).toBe(true);
+  });
+
+  it("un journal d'avant 1.3.0 (sans dirs) reste annulable", () => {
+    write("a.txt", "ancien");
+    const j = new Journal(dir, 1e6);
+    record(j, "r1");
+    const file = path.join(dir, ".fls/runs/r1/meta.json");
+    const meta = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    delete meta["dirs"];
+    fs.writeFileSync(file, JSON.stringify(meta));
+    expect(j.undo("r1", false).removedDirs).toEqual([]);
+  });
+
+  it("history : récents d'abord, limite, filtre par chemin et action (créé, modifié, supprimé, dossier créé)", () => {
+    write("a.txt", "v0");
+    write("gone.txt", "x");
+    const j = new Journal(dir, 1e6);
+    const run = (id: string, fn: (ws: Workspace) => void): void => {
+      const ws = new Workspace(dir, 1e6);
+      fn(ws);
+      j.record(ws, { id, now: new Date("2026-01-01T00:00:00Z"), pending: ws.pending(), script: "s\n", report: "r\n" });
+    };
+    run("r1", (ws) => ws.write("a.txt", Buffer.from("v1")));
+    run("r2", (ws) => ws.write("new.txt", Buffer.from("n")));
+    run("r3", (ws) => ws.remove("gone.txt"));
+    run("r4", (ws) => ws.mkdir("d"));
+    j.undo("r4", false);
+    expect(j.history(null, 10).map((h) => h.id)).toEqual(["r4", "r3", "r2", "r1"]);
+    expect(j.history(null, 2).map((h) => h.id)).toEqual(["r4", "r3"]);
+    expect(j.history(null, 10)[0]).toMatchObject({ undone: true, files: 0, dirs: 1, action: null });
+    expect(j.history("a.txt", 10)).toMatchObject([{ id: "r1", action: "modifié" }]);
+    expect(j.history("new.txt", 10)).toMatchObject([{ id: "r2", action: "créé" }]);
+    expect(j.history("gone.txt", 10)).toMatchObject([{ id: "r3", action: "supprimé" }]);
+    expect(j.history("d", 10)).toMatchObject([{ id: "r4", action: "dossier créé", undone: true }]);
+    expect(j.history("rien", 10)).toEqual([]);
   });
 });

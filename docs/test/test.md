@@ -28,6 +28,7 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 | `src/tree-styled.test.ts` | le rendu stylé d'un arbre par sa structure (branches, contenu à la colonne du nom, marqueurs, repli, langue) et la régression « fichier dont le contenu ressemble à un arbre » |
 | `src/tree.test.ts` | `renderTree` et `walkTree` (fichiers, dossiers, liens, illisibles, surcouche mémoire, structure), `treeText` (texte reconstruit == sortie brute), `@read --tree`, `--tree` global, lecture rapide `fls --tree` |
 | `src/tree.e2e.test.ts` | parité octet pour octet avec `bin/treecat`, divergences volontaires de sécurité, mode script |
+| `src/directive.test.ts` | les directives de 1.3.0 : `@copy`, `@mkdir` (dossiers vides, `undo`), `@stat`, `@expect_*` (constat, garde-fou des écritures, forme `#@`), `@history`, aide |
 | `src/highlight.test.ts` | coloration syntaxique (Shiki) : spans, couleurs du thème opencode |
 | `src/style.test.ts` | le texte stylé : couleurs dégradées, palette, `wrapSpans`, et le sérialiseur `toAnsi` (niveaux, fond, préfixe, limite sans couper une séquence) |
 | `src/journal.test.ts` | le Journal : enregistrement, relecture, annulation, conflits et `--force`, sur de vrais dossiers |

@@ -46,6 +46,9 @@ cd ~/projet && fls --clip
 
 - **Grouper** : un seul script pour plusieurs lectures/modifications, avec des `@note` pour annoter les étapes ; le rapport garde l'ordre.
 - **`@edit` d'abord en `--dry-run`** quand le changement est risqué : `fls --dry-run` simule sans écrire. Chaque SEARCH doit être trouvé **exactement une fois** (`ambiguous_match` donne les numéros de ligne : allonger le contexte du SEARCH). Chaque `@edit` est atomique.
+- **Garder avant d'écrire** : `@expect_exists`, `@expect_missing`, `@expect_contains <fichier> "texte" [--regex] [--count N]` constatent un fait sur l'état simulé. Si l'une échoue (`expectation_failed`), les écritures suivantes sont SKIP, les lectures continuent ; ce qui a déjà été écrit n'est pas annulé (`fls undo`). Les placer avant les `@edit` ; après, elles servent à contrôler le résultat. Un texte sur plusieurs lignes ne se cherche qu'avec `--regex`.
+- **Inspecter** : `@stat <chemin>` (type, taille, lignes, droits, sha1) et `@history [chemin] [--limit N]` (runs du Journal, ou ceux qui ont touché un fichier) sont des lectures, utilisables aussi en `#@`.
+- **Structure** : `@mkdir <dossier>` (parents compris, idempotent, annulable s'il reste vide) et `@copy <source> <destination>` (fichiers, droits conservés).
 - **Relire après écriture** : les directives voient l'état simulé, donc un `@read` placé après un `@edit` montre le résultat dans le même run.
 - **Après un FAIL d'écriture**, les écritures suivantes sont SKIP mais les lectures continuent : lire le rapport en entier avant de relancer.
 - **Annuler** : `fls log` liste les runs, `fls undo` annule le dernier (`--run <id>` pour un précis, `--force` si des fichiers ont changé depuis, sinon `conflict`). Le journal est dans `.fls/` (`fls init` crée `.flsignore` et l'ajoute au `.gitignore`).

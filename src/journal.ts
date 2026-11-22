@@ -20,6 +20,27 @@ export interface RunMeta {
   date: string;
   undone: boolean;
   files: JournalEntry[];
+  /** Dossiers créés par le run (toujours présent une fois lu : vide pour les journaux d'avant 1.3.0). */
+  dirs: string[];
+}
+
+/** Résultat d'un `undo` : les dossiers retirés, et ceux laissés parce qu'ils ne sont pas vides. */
+export interface UndoResult {
+  meta: RunMeta;
+  removedDirs: string[];
+  keptDirs: string[];
+}
+
+export type RunAction = "créé" | "modifié" | "supprimé" | "dossier créé";
+
+/** Un run vu par `history` ; `action` n'existe que pour l'historique d'un chemin. */
+export interface HistoryRun {
+  id: string;
+  date: string;
+  undone: boolean;
+  files: number;
+  dirs: number;
+  action: RunAction | null;
 }
 
 export interface RunRecord {
@@ -31,6 +52,8 @@ export interface RunRecord {
   /** Rapport brut déjà rendu. */
   report: string;
 }
+
+const fileAction = (f: JournalEntry): RunAction => (f.backup === null ? "créé" : f.after === null ? "supprimé" : "modifié");
 
 export class Journal {
   private cwd: string;
@@ -48,7 +71,9 @@ export class Journal {
     const dir = path.join(this.runs, r.id);
     const backupDir = path.join(dir, "backup");
     fs.mkdirSync(backupDir, { recursive: true });
-    const meta: RunMeta = { id: r.id, date: r.now.toISOString(), undone: false, files: ws.apply(r.pending, backupDir) };
+    const dirs = ws.newDirs();
+    const meta: RunMeta = { id: r.id, date: r.now.toISOString(), undone: false, files: ws.apply(r.pending, backupDir), dirs };
+    dirs.forEach((d) => fs.mkdirSync(ws.resolve(d), { recursive: true }));
     this.writeMeta(meta);
     fs.writeFileSync(path.join(dir, "script.fls"), r.script);
     fs.writeFileSync(path.join(dir, "report.txt"), r.report);
@@ -62,7 +87,23 @@ export class Journal {
   meta(id: string): RunMeta {
     const file = path.join(this.runs, id, "meta.json");
     if (!/^[\w-]+$/.test(id) || !fs.existsSync(file)) throw new FlsError("run_not_found", `run introuvable : ${id}`);
-    return JSON.parse(fs.readFileSync(file, "utf8")) as RunMeta;
+    const meta = JSON.parse(fs.readFileSync(file, "utf8")) as Omit<RunMeta, "dirs"> & { dirs?: string[] };
+    return { ...meta, dirs: meta.dirs ?? [] };
+  }
+
+  /** Les runs les plus récents d'abord ; avec `rel`, seulement ceux qui ont touché ce chemin. */
+  history(rel: string | null, limit: number): HistoryRun[] {
+    return this.list()
+      .reverse()
+      .flatMap((m) => {
+        const dirs = m.dirs;
+        const base = { id: m.id, date: m.date, undone: m.undone, files: m.files.length, dirs: dirs.length };
+        if (rel === null) return [{ ...base, action: null }];
+        const file = m.files.find((f) => f.path === rel);
+        if (file !== undefined) return [{ ...base, action: fileAction(file) }];
+        return dirs.includes(rel) ? [{ ...base, action: "dossier créé" as const }] : [];
+      })
+      .slice(0, limit);
   }
 
   show(id: string): { script: string; report: string } {
@@ -72,7 +113,7 @@ export class Journal {
   }
 
   /** Annule le run `id` (défaut : le dernier non annulé) ; refuse en cas de conflit sauf `force`. */
-  undo(id: string | undefined, force: boolean): RunMeta {
+  undo(id: string | undefined, force: boolean): UndoResult {
     const meta = this.meta(id ?? this.latest());
     if (meta.undone) throw new FlsError("already_undone", `le run ${meta.id} est déjà annulé`);
     const ws = new Workspace(this.cwd, this.maxSize);
@@ -87,9 +128,20 @@ export class Journal {
     }
     const backupDir = path.join(this.runs, meta.id, "backup");
     meta.files.forEach((f) => this.restore(ws, backupDir, f));
+    const removedDirs: string[] = [];
+    const keptDirs: string[] = [];
+    for (const d of [...meta.dirs].reverse()) {
+      const abs = ws.resolve(d);
+      if (!fs.existsSync(abs)) continue;
+      if (fs.readdirSync(abs).length > 0) keptDirs.push(d);
+      else {
+        fs.rmdirSync(abs);
+        removedDirs.push(d);
+      }
+    }
     meta.undone = true;
     this.writeMeta(meta);
-    return meta;
+    return { meta, removedDirs, keptDirs };
   }
 
   private latest(): string {
