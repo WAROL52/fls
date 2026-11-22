@@ -52,6 +52,30 @@ cd ~/DEV/projet && fls --clip
 
 Lecture : `@tree`, `@read`, `@grep`, `@stat`, `@history`, `@note`. Écriture : `@edit`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`. Vérifications : `@expect_exists`, `@expect_missing`, `@expect_contains`. Détail : `fls help <directive>`, syntaxe complète : `fls spec` (et [SPEC.md](SPEC.md)).
 
+### Répéter, paramétrer : la syntaxe `@fls 2`
+
+Un script qui commence par `@fls 2` peut avoir des variables, des boucles, des conditions et des macros. Il est **étendu avant d'être exécuté** en un script plat ordinaire (`fls expand` l'affiche), donc `--dry-run`, le Journal et `undo` ne changent pas :
+
+```
+@fls 2
+@def composant(nom)
+@create src/components/{{ nom }}.tsx
+<<<<<<< TEMPLATE
+export const {{ nom }} = () => <div className="{{ lower(nom) }}" style=\{{ margin: 0 }} />
+>>>>>>> END
+@end
+@for nom in ["Button", "Card", "Modal"]
+@call composant(nom)
+@end
+@for f in glob("src/**/*.ts")
+@if not startswith(basename(f), "index")
+@expect_contains {{ f }} "export"
+@end
+@end
+```
+
+Les blocs restent littéraux, sauf `TEMPLATE` (`\{{` pour un `{{` littéral). L'expansion lit le disque tel qu'il est au départ. `fls spec` liste les fonctions intégrées ; `--set nom=valeur` passe une variable. Sans `@fls 2`, un script se lit exactement comme avant.
+
 ### Vérifier avant d'écrire
 
 Une vérification qui échoue fait ignorer les écritures suivantes (les lectures continuent) ; ce qui a déjà été écrit reste, et `fls undo` le défait :

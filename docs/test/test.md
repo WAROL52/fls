@@ -29,6 +29,7 @@ Un test précis : `pnpm exec vitest run -t "forme #@"`.
 | `src/tree.test.ts` | `renderTree` et `walkTree` (fichiers, dossiers, liens, illisibles, surcouche mémoire, structure), `treeText` (texte reconstruit == sortie brute), `@read --tree`, `--tree` global, lecture rapide `fls --tree` |
 | `src/tree.e2e.test.ts` | parité octet pour octet avec `bin/treecat`, divergences volontaires de sécurité, mode script |
 | `src/directive.test.ts` | les directives de 1.3.0 : `@copy`, `@mkdir` (dossiers vides, `undo`), `@stat`, `@expect_*` (constat, garde-fou des écritures, forme `#@`), `@history`, aide |
+| `src/expand.test.ts` | la syntaxe v2 `@fls 2` : expressions (valeurs, opérateurs, erreurs, plafonds), fonctions intégrées, interpolation et blocs `TEMPLATE`, pragma, variables / boucles / conditions / macros (pas de récursion), forme `#@`, erreurs de syntaxe et d'expansion, `--set`, `--max-expanded`, de bout en bout (`expand`, exécution, `--dry-run`, journal) |
 | `src/highlight.test.ts` | coloration syntaxique (Shiki) : spans, couleurs du thème opencode |
 | `src/style.test.ts` | le texte stylé : couleurs dégradées, palette, `wrapSpans`, et le sérialiseur `toAnsi` (niveaux, fond, préfixe, limite sans couper une séquence) |
 | `src/journal.test.ts` | le Journal : enregistrement, relecture, annulation, conflits et `--force`, sur de vrais dossiers |

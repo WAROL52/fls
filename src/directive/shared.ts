@@ -25,13 +25,16 @@ export function compileRegex(source: string, flags: string): RegExp {
   }
 }
 
+/** Ce qu'il faut pour parcourir un dossier : l'espace de travail et les règles d'ignore. */
+export type Walk = Pick<Ctx, "ws" | "ignore">;
+
 export interface Child {
   name: string;
   rel: string;
   kind: Kind;
 }
 
-export function children(ctx: Ctx, rel: string): Child[] {
+export function children(ctx: Walk, rel: string): Child[] {
   return ctx.ws
     .list(rel)
     .map((name) => ({ name, rel: joinRel(rel, name), kind: ctx.ws.kind(joinRel(rel, name)) as Kind }))
@@ -55,7 +58,7 @@ export function treeLines(ctx: Ctx, rel: string, depth: number, dirsOnly: boolea
   });
 }
 
-export function collectFiles(ctx: Ctx, rel: string): string[] {
+export function collectFiles(ctx: Walk, rel: string): string[] {
   return children(ctx, rel).flatMap((c) => (c.kind === "dir" ? collectFiles(ctx, c.rel) : [c.rel]));
 }
 

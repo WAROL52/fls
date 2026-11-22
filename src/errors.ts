@@ -12,7 +12,7 @@ export class FlsError extends Error {
 export const syntaxError = (line: number, detail: string): FlsError =>
   new FlsError("syntax_error", `ligne ${line} : ${detail}`);
 
-export const USAGE_CODES = new Set(["syntax_error", "usage_error", "unknown_directive"]);
+export const USAGE_CODES = new Set(["syntax_error", "usage_error", "unknown_directive", "expansion_error"]);
 
 export const ERROR_CODES: Array<[string, string]> = [
   ["syntax_error", "script mal formé (rien n'a été exécuté, code de sortie 2)"],
@@ -30,6 +30,7 @@ export const ERROR_CODES: Array<[string, string]> = [
   ["not_utf8", "le fichier n'est pas de l'UTF-8 valide"],
   ["invalid_argument", "valeur d'argument ou d'option invalide"],
   ["skipped", "écriture ignorée parce qu'une écriture ou une vérification précédente a échoué"],
+  ["expansion_error", "syntaxe v2 : l'expansion du script a échoué (code de sortie 2, rien n'a été exécuté)"],
   ["expectation_failed", "une vérification `@expect_*` n'est pas satisfaite (les écritures suivantes sont ignorées)"],
   ["run_not_found", "identifiant de run inconnu"],
   ["already_undone", "ce run a déjà été annulé"],

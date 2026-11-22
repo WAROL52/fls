@@ -20,9 +20,9 @@ import * as path from "node:path";
 import { isatty } from "node:tty";
 import { pathToFileURL } from "node:url";
 import { DIRECTIVES, SPEC_BY_NAME } from "./directive/index.ts";
-import { ERROR_CODES, FlsError, syntaxError, USAGE_CODES } from "./errors.ts";
+import { ERROR_CODES, FlsError, USAGE_CODES } from "./errors.ts";
 import { loadIgnore } from "./paths.ts";
-import { blockLines, quote, splitLines, tokenize } from "./text.ts";
+import { quote, splitLines } from "./text.ts";
 import { numberArg } from "./args.ts";
 import { colorizeError, colorPlan } from "./color.ts";
 import { treeRel, treeText, walkTree, type TreeNode } from "./tree.ts";
@@ -43,169 +43,18 @@ import type {
 import { renderPlain } from "./report/plain.ts";
 import { textBody, type Entry, type ReportDoc } from "./report/segments.ts";
 import { Journal } from "./journal.ts";
+import { BUILTINS } from "./expand/builtins.ts";
+import { expandScript, isV2 } from "./expand/expand.ts";
+import { makeOp, parseScript, serialize } from "./script.ts";
 import { loadLast } from "./last.ts";
 import { deliver, destinationsFor } from "./output.ts";
 import { VERSION } from "./version.ts";
 import { Workspace } from "./workspace.ts";
 
 export { VERSION };
+export { clipRegions, makeOp, parseScript, serialize, serializeOp } from "./script.ts";
 const DEFAULT_MAX_SIZE = 1_048_576;
-
-// ───────────────────────────── Parseur de script ─────────────────────────────
-
-const M = {
-  searchOpen: "<<<<<<< SEARCH",
-  sep: "=======",
-  replaceClose: ">>>>>>> REPLACE",
-  contentOpen: "<<<<<<< CONTENT",
-  contentClose: ">>>>>>> END",
-};
-
-const nextNonBlank = (lines: string[], from: number): number => {
-  let i = from;
-  while (i < lines.length && lines[i].trim() === "") i += 1;
-  return i;
-};
-
-function takeUntil(lines: string[], from: number, end: string, opLine: number): { body: string[]; next: number } {
-  const at = lines.indexOf(end, from);
-  if (at === -1) throw syntaxError(opLine, `marqueur ${end} manquant`);
-  return { body: lines.slice(from, at), next: at + 1 };
-}
-
-function readEdits(lines: string[], start: number, op: Op): number {
-  let i = nextNonBlank(lines, start);
-  while (lines[i] === M.searchOpen) {
-    const search = takeUntil(lines, i + 1, M.sep, op.line);
-    const replace = takeUntil(lines, search.next, M.replaceClose, op.line);
-    const searchText = search.body.join("\n");
-    if (searchText === "") throw syntaxError(op.line, "SEARCH vide (pour créer un fichier, utilise @create)");
-    op.edits.push({ search: searchText, replace: replace.body.join("\n") });
-    i = nextNonBlank(lines, replace.next);
-  }
-  if (op.edits.length === 0) throw syntaxError(op.line, `@edit attend un bloc ${M.searchOpen}`);
-  return i;
-}
-
-function readContent(lines: string[], start: number, op: Op): number {
-  const i = nextNonBlank(lines, start);
-  if (lines[i] !== M.contentOpen) throw syntaxError(op.line, `@${op.name} attend un bloc ${M.contentOpen}`);
-  const body = takeUntil(lines, i + 1, M.contentClose, op.line);
-  op.content = body.body.length === 0 ? "" : `${body.body.join("\n")}\n`;
-  return body.next;
-}
-
-const BLOCK_READERS: Record<Spec["block"], (lines: string[], start: number, op: Op) => number> = {
-  none: (_lines, start) => start,
-  edit: readEdits,
-  content: readContent,
-};
-
-const optionName = (spec: Spec, tok: Token): string | null => {
-  if (tok.quoted) return null;
-  if (Object.hasOwn(spec.aliases, tok.text)) return spec.aliases[tok.text];
-  return tok.text.startsWith("--") ? tok.text.slice(2) : null;
-};
-
-function parseDirective(line: string, lineNo: number): Op {
-  const tokens = tokenize(line);
-  if (tokens === null) throw syntaxError(lineNo, "guillemet non fermé");
-  const [head, ...rest] = tokens;
-  const spec = SPEC_BY_NAME.get(head.text.slice(1));
-  if (spec === undefined) throw syntaxError(lineNo, `directive inconnue ${head.text}`);
-  const op: Op = { line: lineNo, name: spec.name, args: [], opts: {}, edits: [], content: "" };
-  for (let i = 0; i < rest.length; i++) {
-    const name = optionName(spec, rest[i]);
-    if (name === null) {
-      op.args.push(rest[i].text);
-      continue;
-    }
-    const kind = Object.hasOwn(spec.options, name) ? spec.options[name] : undefined;
-    if (kind === undefined) throw syntaxError(lineNo, `option inconnue --${name} pour @${spec.name}`);
-    if (kind === "flag") {
-      op.opts[name] = true;
-      continue;
-    }
-    i += 1;
-    if (i >= rest.length) throw syntaxError(lineNo, `--${name} attend une valeur`);
-    op.opts[name] = rest[i].text;
-  }
-  const [min, max] = spec.positional;
-  if (op.args.length < min || op.args.length > max) {
-    throw syntaxError(lineNo, `@${spec.name} attend entre ${min} et ${max} argument(s), reçu ${op.args.length}`);
-  }
-  return op;
-}
-
-const CLIP_MARKER = /^\s*#{3,}\s*clip\s+(start|end)\s*#*\s*$/i;
-const HASH_DIRECTIVE = /^#@[A-Za-z]/;
-const HASH_NAME = /^#@([A-Za-z][A-Za-z_]*)/;
-
-/**
- * Zone utile d'un script collé : si au moins un `clip start` existe, seules les lignes entre
- * `clip start` et `clip end` (ou la fin) sont gardées ; le reste est blanchi (la numérotation
- * des lignes est conservée pour les messages d'erreur).
- */
-export function clipRegions(lines: string[]): string[] {
-  const marks = lines.map((l) => CLIP_MARKER.exec(l)?.[1].toLowerCase());
-  if (!marks.includes("start")) return lines;
-  let inside = false;
-  return lines.map((line, i) => {
-    const mark = marks[i];
-    if (mark !== undefined) {
-      inside = mark === "start";
-      return "";
-    }
-    return inside ? line : "";
-  });
-}
-
-/** `#@nom …` (collé à une lettre) devient `@nom …` ; réservé aux directives de lecture. */
-function unhash(trimmed: string, lineNo: number): string {
-  const name = HASH_NAME.exec(trimmed)?.[1] as string;
-  const spec = SPEC_BY_NAME.get(name);
-  if (spec === undefined) throw syntaxError(lineNo, `directive inconnue #@${name}`);
-  if (spec.writes) throw syntaxError(lineNo, `#@${name} : les directives d'écriture exigent la forme @${name}`);
-  return trimmed.slice(1);
-}
-
-export function parseScript(text: string): Op[] {
-  const lines = clipRegions(text.split(/\r?\n/));
-  const ops: Op[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    let trimmed = lines[i].trim();
-    if (HASH_DIRECTIVE.test(trimmed)) trimmed = unhash(trimmed, i + 1);
-    else if (trimmed === "" || trimmed.startsWith("#")) {
-      i += 1;
-      continue;
-    }
-    if (!trimmed.startsWith("@")) throw syntaxError(i + 1, "ligne inattendue (une directive commence par @)");
-    const op = parseDirective(trimmed, i + 1);
-    i = BLOCK_READERS[(SPEC_BY_NAME.get(op.name) as Spec).block](lines, i + 1, op);
-    ops.push(op);
-  }
-  return ops;
-}
-
-export function makeOp(name: string, args: string[]): Op {
-  return { line: 0, name, args, opts: {}, edits: [], content: "" };
-}
-
-// ───────────────────────────── Script plat (sérialisation) ─────────────────────────────
-
-const BLOCK_WRITERS: Record<Spec["block"], (op: Op) => string[]> = {
-  none: () => [],
-  edit: (op) => op.edits.flatMap((e) => [M.searchOpen, ...blockLines(e.search), M.sep, ...blockLines(e.replace), M.replaceClose]),
-  content: (op) => [M.contentOpen, ...blockLines(op.content.replace(/\n$/, "")), M.contentClose],
-};
-
-export function serializeOp(op: Op): string {
-  const options = Object.entries(op.opts).flatMap(([k, v]) => (v === true ? [`--${k}`] : [`--${k}`, quote(v)]));
-  const head = [`@${op.name}`, ...op.args.map(quote), ...options].join(" ");
-  return [head, ...BLOCK_WRITERS[(SPEC_BY_NAME.get(op.name) as Spec).block](op)].join("\n");
-}
-export const serialize = (ops: Op[]): string => ops.map((o) => `${serializeOp(o)}\n`).join("\n");
+const DEFAULT_MAX_EXPANDED = 2000;
 
 // ───────────────────────────── Exécution et rapport ─────────────────────────────
 
@@ -313,6 +162,8 @@ const GLOBAL_DOCS: string[] = [
   "--ignore <motif>        motif d'ignore supplémentaire (répétable)",
   "--max-size <octets>     taille maximale d'un fichier lu ou modifié (défaut 1048576)",
   "--max-output-chars <n>  taille maximale du rapport (défaut 200000)",
+  "--set <nom=valeur>      (script @fls 2) définit une variable de texte, répétable",
+  "--max-expanded <n>      (script @fls 2) plafond de directives émises (défaut 2000)",
   "--run <id>              (undo, log) cible un run précis",
   "--force                 (undo) restaure même si des fichiers ont changé depuis",
   "-h, --help / --version",
@@ -373,10 +224,32 @@ const SPEC_INTRO = [
   "Codes de sortie : 0 tout OK ; 1 au moins un FAIL ; 2 erreur de syntaxe ou d'usage (rien n'a été exécuté).",
 ].join("\n");
 
+const V2_INTRO = [
+  "## Syntaxe v2 (script qui commence par @fls 2)",
+  "",
+  "Un Script source est étendu AVANT toute exécution, sur l'état initial du disque, en un Script plat",
+  "(la syntaxe v1) : `fls expand` l'affiche, le journal l'enregistre. Sans `@fls 2`, rien ne change.",
+  "- `@fls 2` doit être la première ligne ; en zone clip : `#@fls 2` ;",
+  "- `@let nom = expression`, `@for nom in expression … @end`, `@if expression … @elif … @else … @end` ;",
+  "- `@def nom(a, b) … @end` définit une macro (premier niveau seulement) ; `@call nom(x, y)` l'émet ;",
+  "  une macro ne peut appeler que des macros déjà définies (pas de récursion) et voit les variables globales ;",
+  "- `{{ expression }}` s'interpole dans les arguments et les valeurs d'option (texte ou entier ; `\\{{` = `{{` littéral) ;",
+  "- les blocs restent LITTÉRAUX ; un bloc interpolé s'ouvre par `<<<<<<< TEMPLATE` (@create, @overwrite, @write, @append)",
+  "  ou `<<<<<<< SEARCH TEMPLATE` (@edit, SEARCH et REPLACE de ce bloc) ;",
+  "- expressions : texte, entier, True/False, listes, dictionnaires ; + - * // % ; == != < <= > >= ; and or not ; in ;",
+  "  `x[i]` ; `a if c else b` ; fonctions intégrées seulement (pas de méthodes, de lambda ni de compréhension) ;",
+  "- forme `#@` : les lignes de contrôle y sont permises, pas les écritures (même émises par un `#@call`) ;",
+  "- `--set nom=valeur` (texte, répétable), `--max-expanded n` (plafond de directives émises, défaut 2000) ;",
+  "- une erreur d'expansion (`expansion_error`) ou de syntaxe : code de sortie 2, rien n'est exécuté.",
+  "",
+  "Fonctions intégrées (lecture seule, mêmes règles de confinement que les lectures) :",
+  ...BUILTINS.map((b) => `  ${b.usage.padEnd(42)} ${b.doc}`),
+].join("\n");
+
 export function buildSpec(): string {
   const globals = ["## Options globales", ...GLOBAL_DOCS.map((d) => `  ${d}`)].join("\n");
   const errors = ["## Codes d'erreur", ...ERROR_CODES.map(([c, d]) => `  ${c.padEnd(22)} ${d}`)].join("\n");
-  return `${[SPEC_INTRO, globals, "## Directives", ...DIRECTIVES.map(helpText), errors].join("\n\n")}\n`;
+  return `${[SPEC_INTRO, globals, "## Directives", ...DIRECTIVES.map(helpText), V2_INTRO, errors].join("\n\n")}\n`;
 }
 
 const cmdSpec = async (): Promise<Report> => ({ text: buildSpec(), code: 0 });
@@ -470,12 +343,14 @@ const GLOBAL: Record<string, "flag" | "value" | "list"> = {
   "max-size": "value",
   "max-output-chars": "value",
   run: "value",
+  "max-expanded": "value",
   ignore: "list",
+  set: "list",
 };
 const SHORT: Record<string, string> = { "-h": "help" };
 
 export function parseArgs(argv: string[]): Args {
-  const args: Args = { positional: [], flags: new Set(), values: new Map(), ignore: [] };
+  const args: Args = { positional: [], flags: new Set(), values: new Map(), ignore: [], sets: [] };
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
     const rawName = Object.hasOwn(SHORT, tok) ? SHORT[tok] : tok.startsWith("--") ? tok.slice(2) : null;
@@ -495,7 +370,7 @@ export function parseArgs(argv: string[]): Args {
     }
     const val = inline ?? argv[++i];
     if (val === undefined) throw new FlsError("usage_error", `--${name} attend une valeur`);
-    if (kind === "list") args.ignore.push(val);
+    if (kind === "list") (name === "set" ? args.sets : args.ignore).push(val);
     else args.values.set(name, val);
   }
   return args;
@@ -512,12 +387,34 @@ function scriptText(args: Args, io: Io): string {
 const hasScriptSource = (args: Args, io: Io): boolean =>
   args.values.has("file") || args.flags.has("clip") || args.flags.has("clip-in") || !io.stdinIsTTY;
 
+/** `--set nom=valeur` : des variables de texte pour un script `@fls 2`. */
+function setVars(sets: string[]): Record<string, string> {
+  return Object.fromEntries(
+    sets.map((s) => {
+      const m = /^([A-Za-z_]\w*)=([\s\S]*)$/.exec(s);
+      if (m === null) throw new FlsError("usage_error", `--set attend nom=valeur (reçu : ${s})`);
+      return [m[1], m[2]];
+    }),
+  );
+}
+
+/** Le Script plat d'un script : tel quel en syntaxe v1, après expansion s'il commence par `@fls 2`. */
+function loadOps(args: Args, io: Io): Op[] {
+  const text = scriptText(args, io);
+  if (!isV2(text)) {
+    if (args.sets.length > 0 || args.values.has("max-expanded")) throw new FlsError("usage_error", "--set et --max-expanded n'ont de sens que pour un script qui commence par @fls 2");
+    return parseScript(text);
+  }
+  const ws = new Workspace(io.cwd, numberArg(args, "max-size", DEFAULT_MAX_SIZE));
+  return expandScript(text, { ws, ignore: loadIgnore(ws, args.ignore), vars: setVars(args.sets), maxExpanded: numberArg(args, "max-expanded", DEFAULT_MAX_EXPANDED) });
+}
+
 async function cmdRun(args: Args, io: Io): Promise<Report> {
-  const ops = parseScript(scriptText(args, io));
+  const ops = loadOps(args, io);
   if (args.flags.has("tree")) for (const op of ops) if (op.name === "read") op.opts["tree"] = true;
   return execAndReport(args, io, ops, args.flags.has("dry-run"));
 }
-const cmdExpand = async (args: Args, io: Io): Promise<Report> => ({ text: serialize(parseScript(scriptText(args, io))), code: 0 });
+const cmdExpand = async (args: Args, io: Io): Promise<Report> => ({ text: serialize(loadOps(args, io)), code: 0 });
 
 function quickPaths(args: Args, io: Io): string[] {
   const listFile = args.values.get("paths-from");

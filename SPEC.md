@@ -1,6 +1,6 @@
 # SPEC — fls v1
 
-Spécification du comportement de `fls.ts` (version `1.3.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
+Spécification du comportement de `fls.ts` (version `1.4.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
 
 Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lancement : `node fls.ts …` (ou un alias vers ce fichier).
 
@@ -143,6 +143,38 @@ Pour rester compatible avec les premiers exemples : `@read f 1-30` (plage positi
 
 Commentaires et lignes vides supprimés, alias remplacés par leur forme longue (`-C 2` → `--context 2`), arguments re-guillemetés au besoin, blocs conservés, une directive par paragraphe, séparés par une ligne vide. `parse(expand(x))` est équivalent à `parse(x)`. Le journal enregistre cette forme.
 
+### 4.6 Syntaxe v2 : `@fls 2` (depuis 1.4.0)
+
+Un script dont la **première ligne utile** est `@fls 2` (en zone clip : `#@fls 2`) est un **Script source** : il est **étendu avant toute exécution** en un Script plat (la syntaxe v1, §4.5). Sans cette ligne, rien ne change : `{{` reste du texte, et un script v1 s'exécute à l'identique. Toute autre version (`@fls 3`) ou un `@fls` ailleurs qu'en tête est une `syntax_error`.
+
+**Modèle d'évaluation.** L'expansion lit le disque **tel qu'il est au départ** (`exists`, `read`, `glob`…) ; elle ne voit jamais l'état simulé par les écritures du script. Elle produit un Script plat que `fls expand` affiche, que `--dry-run` simule, que le Journal enregistre et que `undo` annule comme avant. Le Rapport est celui du script plat : une entrée par directive émise, les lignes de contrôle n'y figurent pas.
+
+**Lignes de contrôle** (une par ligne ; l'indentation n'a aucun sens ; `@end` ferme la construction ouverte la plus proche) :
+
+| Ligne | Effet |
+|---|---|
+| `@let nom = expression` | affecte une variable |
+| `@for nom in expression` … `@end` | parcourt une liste (ou les clés d'un dictionnaire) ; la variable reste définie après la boucle |
+| `@if expression` … `@elif expression` … `@else` … `@end` | condition (vrai/faux à la façon de Python : `0`, `""`, `[]`, `{}` sont faux) |
+| `@def nom(a, b)` … `@end` | définit une **macro** (premier niveau seulement) |
+| `@call nom(x, y)` | émet les directives de la macro, paramètres remplacés |
+
+Une macro voit ses paramètres, ses propres `@let` et les variables globales ; ses `@let` ne fuient pas. Elle ne peut appeler que des macros **déjà définies plus haut** : la récursion est donc impossible par construction (`expansion_error` sinon). Il n'y a pas de fonction de valeur écrite par l'utilisateur : le calcul passe par les fonctions intégrées.
+
+**Interpolation `{{ expression }}`** dans les arguments et les valeurs d'option d'une directive. Dans une ligne de directive, `{{ … }}` est une unité (ses espaces ne coupent pas le mot) ; la valeur doit être un **texte ou un entier** (liste, dictionnaire, booléen : `expansion_error`). `\{{` donne un `{{` littéral. Un mot qui contient une interpolation n'est **jamais une option** : une valeur calculée ne peut pas en fabriquer une.
+
+**Blocs.** `SEARCH`/`REPLACE` et `CONTENT` restent **littéraux** (même `{{ }}`, même une ligne `@for`) : un composant React avec `style={{ … }}` se colle tel quel. Un bloc interpolé s'ouvre par `<<<<<<< TEMPLATE` (au lieu de `CONTENT`, pour `@create`, `@overwrite`, `@write`, `@append`) ou par `<<<<<<< SEARCH TEMPLATE` (au lieu de `SEARCH`, pour `@edit` : le SEARCH et le REPLACE de ce bloc sont interpolés ; un `@edit` peut mêler blocs littéraux et blocs `TEMPLATE`). Un SEARCH vide après interpolation est une erreur. Ces marqueurs n'existent pas en syntaxe v1.
+
+**Expressions** (analyseur écrit à la main, aucun `eval`) : textes (`"…"` ou `'…'`, échappements `\n \t \\ \" \'`), entiers, `True`/`False`, listes `[…]`, dictionnaires `{"a": 1}` (clés texte ou entier) ; `+ - * // %` (entiers ; `+` aussi sur textes et listes, `*` texte × entier ; `//` et `%` à la Python), `== != < <= > >=`, `and or not` (valeurs à la Python), `in` / `not in`, `x[i]` (indice négatif permis), `a if c else b`. Pas de flottants, de `None`, de méthodes (`upper(x)`, pas `x.upper()`), de lambda ni de compréhension. Plafonds : expression de 2000 caractères et 64 niveaux d'imbrication, texte de 1 000 000 de caractères, liste de 10 000 éléments, entiers sûrs de JavaScript.
+
+**Fonctions intégrées** (lecture seule ; mêmes règles que les lectures : confinement au dossier courant, liens non suivis, binaires et fichiers trop gros refusés ; ni shell, ni réseau, ni horloge, ni aléatoire, donc une expansion est déterministe) : `glob(motif)` (fichiers, triés, règles d'ignore ; `*`, `**`, `?` ; `src/**/*.ts` inclut `src/a.ts`), `exists`, `is_file`, `is_dir`, `read`, `lines`, `len`, `range`, `sorted`, `join`, `split`, `replace`, `upper`, `lower`, `capitalize` (première lettre seulement), `strip`, `startswith`, `endswith`, `basename`, `dirname`, `stem`, `int`, `str`. La liste exacte et les signatures sont dans `fls spec`.
+
+**Options.** `--set nom=valeur` (répétable ; toujours un texte ; `int()` convertit) définit une variable globale avant l'expansion ; `--max-expanded N` (défaut 2000) plafonne les directives émises. Les deux n'ont de sens que pour un script `@fls 2` (sinon `usage_error`). L'expansion est aussi bornée à 200 000 étapes, et 50 niveaux de constructions imbriquées.
+
+**Forme `#@`.** Les lignes de contrôle sont permises en `#@`. Les directives restent soumises à la règle de la forme `#@` : une écriture est refusée, y compris celle qu'émet une macro appelée par `#@call` (`expansion_error`).
+
+**Erreurs.** Script mal formé (construction non fermée, `@end` orphelin, expression invalide, directive inconnue…) : `syntax_error`. Erreur à l'évaluation (variable inconnue, division par zéro, type invalide, plafond, lecture impossible…) : `expansion_error`, avec la ligne du script source et, dans une macro, la chaîne d'appel (`dans la macro m, appelée ligne N`). Dans les deux cas : **code de sortie 2, rien n'est exécuté**.
+
 ## 5. Directives
 
 Convention : `[x]` facultatif, `<x>` obligatoire.
@@ -243,7 +275,7 @@ Constatent un fait sur l'état simulé (un `@expect_contains` après un `@edit` 
 ## 8. Rapport
 
 ```
-fls 1.3.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
+fls 1.4.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
 
 [1] OK    TREE src
 …
@@ -300,7 +332,7 @@ Un run qui ne fait que créer des dossiers est un run (`Modifiés : d/`).
 
 | Code | Sens |
 |---|---|
-| `syntax_error` | script mal formé (exit 2) |
+| `syntax_error` | script mal formé, y compris une construction v2 ou une expression invalide (exit 2) |
 | `usage_error` | ligne de commande invalide (exit 2) |
 | `unknown_directive` | `fls help` sur une directive inconnue (exit 2) |
 | `not_found` | chemin ou texte SEARCH introuvable |
@@ -313,6 +345,7 @@ Un run qui ne fait que créer des dossiers est un run (`Modifiés : d/`).
 | `invalid_argument` | valeur d'argument ou d'option invalide |
 | `skipped` | écriture ignorée après un échec d'écriture ou de vérification |
 | `expectation_failed` | une vérification `@expect_*` n'est pas satisfaite |
+| `expansion_error` | syntaxe v2 : l'expansion a échoué (exit 2, rien n'est exécuté) |
 | `run_not_found` / `already_undone` / `nothing_to_undo` / `conflict` | journal et `undo` |
 | `no_last_output` | `fls last` : aucune sortie mémorisée |
 | `clipboard_unavailable` | aucun outil de presse-papiers |
@@ -334,7 +367,7 @@ Premier outil qui réussit, dans l'ordre : `wl-paste` / `wl-copy`, `xclip -selec
 
 - **Entrées/sorties injectées** (`Io` : dossier courant, entrée standard, sorties, presse-papiers, horloge, identifiant) ; `main(argv, io)` renvoie le code de sortie. Le vrai `Io` n'est construit qu'au chargement du module, et le démarrage passe par `bootstrap(isEntry(...), start)`, entièrement testable.
 - **Tables** plutôt que chaînes de `if` : directives (`DIRECTIVES`, utilisées par le parseur, l'aide et la spec), sous-commandes, options globales, lecteurs/écrivains de blocs, vérifications d'écriture, outils de presse-papiers.
-- **Modules** : `src/fls.ts` (parseur, exécution, aide, CLI), `src/journal.ts` (le Journal : format de `.fls/runs/<id>/`, enregistrement, liste, relecture, annulation avec détection des conflits ; il renvoie des données, `fls.ts` construit les rapports de `log` et `undo`), `src/tree.ts` (lecture d'un arbre en **structure** `TreeNode` — dossiers, fichiers avec leurs lignes, liens — et sortie brute façon treecat produites par un seul parcours : `walkTree`, `treeText`) et `src/report/tree-styled.ts` (rendu stylé d'un `--tree`, qui parcourt la structure), `src/output.ts` (livraison d'une sortie à ses **destinations** : terminal, fichier de `--output`, presse-papiers ; chacune porte sa couleur, sa largeur et sa limite, et le Rapport n'est rendu qu'une fois par jeu d'options), `src/last.ts` (Dernière sortie), `src/args.ts`, `src/version.ts`, `src/style.ts` (le texte stylé comme donnée : spans, lignes, couleurs dégradées, palette, repli), `src/ansi.ts` (le seul sérialiseur ANSI, avec la limite de `--max-output-chars`), `src/highlight.ts` (coloration syntaxique Shiki, renvoie des spans), `src/report/` (le Rapport comme donnée : `segments.ts` types `Segment` / `Entry` / `ReportDoc`, `plain.ts` rendu brut, `styled.ts` rendu stylé en lignes stylées, `code-block.ts` gouttière et repli, `snapshot.ts` copie versionnée de la Dernière sortie), `src/directive/<nom>.ts` (une `Spec` par directive ; `expect.ts` en regroupe trois, assemblées par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
+- **Modules** : `src/fls.ts` (parseur, exécution, aide, CLI), `src/journal.ts` (le Journal : format de `.fls/runs/<id>/`, enregistrement, liste, relecture, annulation avec détection des conflits ; il renvoie des données, `fls.ts` construit les rapports de `log` et `undo`), `src/tree.ts` (lecture d'un arbre en **structure** `TreeNode` — dossiers, fichiers avec leurs lignes, liens — et sortie brute façon treecat produites par un seul parcours : `walkTree`, `treeText`) et `src/report/tree-styled.ts` (rendu stylé d'un `--tree`, qui parcourt la structure), `src/output.ts` (livraison d'une sortie à ses **destinations** : terminal, fichier de `--output`, presse-papiers ; chacune porte sa couleur, sa largeur et sa limite, et le Rapport n'est rendu qu'une fois par jeu d'options), `src/last.ts` (Dernière sortie), `src/args.ts`, `src/version.ts`, `src/style.ts` (le texte stylé comme donnée : spans, lignes, couleurs dégradées, palette, repli), `src/ansi.ts` (le seul sérialiseur ANSI, avec la limite de `--max-output-chars`), `src/highlight.ts` (coloration syntaxique Shiki, renvoie des spans), `src/report/` (le Rapport comme donnée : `segments.ts` types `Segment` / `Entry` / `ReportDoc`, `plain.ts` rendu brut, `styled.ts` rendu stylé en lignes stylées, `code-block.ts` gouttière et repli, `snapshot.ts` copie versionnée de la Dernière sortie), `src/script.ts` (parseur et sérialiseur du script plat), `src/expand/` (la syntaxe v2 : `values.ts`, `expr.ts` expressions, `builtins.ts` fonctions intégrées, `template.ts` interpolation, `expand.ts` l'expansion en Script plat), `src/directive/<nom>.ts` (une `Spec` par directive ; `expect.ts` en regroupe trois, assemblées par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
 - **`Workspace`** : surcouche en mémoire au-dessus du disque ; le dry-run et l'exécution réelle partagent tout le code, seul `apply` (commit) diffère.
 - **Syntaxe TypeScript effaçable uniquement** (ni `enum` ni propriétés de paramètre) : `node src/fls.ts` suffit.
 

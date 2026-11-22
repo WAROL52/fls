@@ -2,6 +2,12 @@
 
 **Directive** — Instruction d'un script fls (`@read`, `@grep`, `@edit`…), une par ligne, éventuellement suivie d'un bloc.
 
+**Script source** — Script écrit avec la syntaxe v2 (il commence par `@fls 2`) : variables, boucles, conditions, macros, interpolation. Il n'est jamais exécuté tel quel ; l'Expansion le transforme en Script plat.
+
+**Expansion** — Phase qui transforme un Script source en Script plat, avant toute exécution, en lisant le disque tel qu'il est au départ (jamais l'état simulé par le script). `fls expand` l'affiche.
+
+**Macro** — Groupe de directives nommé et paramétré (`@def`), émis par `@call`. Elle ne peut appeler que des macros définies plus haut, donc jamais elle-même.
+
 **Script plat** — Forme canonique d'un script : une directive par paragraphe, alias développés, sans commentaires. Produit par `fls expand` et enregistré dans le journal.
 
 **Forme `#@`** — Écriture d'une directive de lecture précédée de `#`, équivalente à la forme `@`. Elle reste un commentaire pour un shell, ce qui permet de coller un script dans un terminal.

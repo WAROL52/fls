@@ -36,11 +36,11 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 
 | Sujet | Quand |
 |---|---|
-| Syntaxe de programmation (variables, boucles, conditions, fonctions) | v2, indépendante de v1 |
-| Directives `@copy`, `@mkdir`, `@stat`, `@expect_*`, `@history` | si le besoin se confirme |
+| Syntaxe de programmation (variables, boucles, conditions, fonctions) | livrée en 1.4.0 (`@fls 2`), voir l'ADR-0008 |
+| Directives `@copy`, `@mkdir`, `@stat`, `@expect_*`, `@history` | livrées en 1.3.0 |
 | Directives structurelles (ast-grep) | après v2 |
 | Snippets, codegen, registry de partage | après v2 |
-| `@delete` / `@move` sur des dossiers, globs, `--all` | v2 |
+| `@delete` / `@move` sur des dossiers, `--all` | non planifié ; les globs passent par `glob()` + `@for` (1.4.0) |
 | Sortie JSON, interface TUI/web, Windows natif | non planifié |
 
 ## 5. Exigences fonctionnelles
@@ -87,17 +87,17 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 | Un SEARCH écrit de mémoire par le modèle ne correspond plus au fichier | Échec explicite avec la ligne la plus proche ; le rapport contient le fichier relu, donc la correction se fait en un tour. |
 | Coller un gros heredoc dans un terminal corrompt les tabulations / tronque les longues lignes | `--clip` et `--file` contournent le terminal ; recommandés comme mode principal. |
 | Exécuter un script produit par un LLM | Confinement des chemins, pas de shell, `--dry-run`, `expand`, journal et `undo`. |
-| Dérive de périmètre vers un langage complet | v1 figée sans programmation ; la v2 est une couche d'expansion séparée qui produit le script plat de la v1. |
+| Dérive de périmètre vers un langage complet | La couche de programmation est une expansion séparée qui produit le script plat de la v1 ; pas de fonctions de valeur ni de récursion, pas d'accès hors du disque du projet, plafonds de taille et d'étapes. |
 | `undo` écrase un travail manuel | Détection de conflit par empreinte du contenu écrit ; refus sans `--force`. |
 
 ## 10. Feuille de route
 
 - **v1** (ce document) : directives plates, journal, undo, `--clip`.
-- **v2** : couche de programmation de syntaxe Python (variables, `for`, `if`, fonctions sans récursion, interpolation `{{ expr }}`), évaluée **en une phase d'expansion** sur l'état initial, qui produit un script plat exécuté par la v1 ; globs et `--all`.
+- **v2 (livrée en 1.4.0, `@fls 2`)** : couche de programmation (variables, `@for`, `@if`, macros sans récursion, interpolation `{{ expr }}`, fonctions intégrées en lecture seule), évaluée **en une phase d'expansion** sur l'état initial, qui produit un script plat exécuté par la v1 ; les globs passent par `glob()`. Voir `SPEC.md` §4.6 et l'ADR-0008.
 - **v3** : `@find_ast` / `@edit_ast` (ast-grep : il calcule, fls écrit), snippets et codegen d'infrastructure idempotents, distribution par registry.
 
 ## 11. Questions ouvertes
 
 - Faut-il un repli sur les espaces de fin de ligne pour les correspondances SEARCH (signalé dans le rapport) ?
 - `undo` doit-il supprimer les dossiers vides créés par le run ?
-- Quels dictionnaires / fonctions intégrées exige la v2 dès sa première version ?
+- ~~Quels dictionnaires / fonctions intégrées exige la v2 dès sa première version ?~~ Réglé en 1.4.0 : dictionnaires de texte/entier, et la liste fermée de `fls spec` (lecture seule).

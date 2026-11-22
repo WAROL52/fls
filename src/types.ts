@@ -91,6 +91,8 @@ export interface Args {
   flags: Set<string>;
   values: Map<string, string>;
   ignore: string[];
+  /** `--set nom=valeur` (syntaxe v2), répétable. */
+  sets: string[];
 }
 
 export interface Spec {

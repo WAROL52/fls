@@ -209,9 +209,9 @@ describe("aide, version et environnement réel", () => {
     expect(fls.buildSpec()).toContain("no_last_output");
   });
 
-  it("version 1.3.0", async () => {
+  it("version 1.4.0", async () => {
     const s = session();
-    expect((await s.run(["--version"])).text).toBe("fls 1.3.0\n");
+    expect((await s.run(["--version"])).text).toBe("fls 1.4.0\n");
   });
 
   it("cacheDirFor : XDG_CACHE_HOME sinon ~/.cache", () => {
