@@ -18,6 +18,8 @@ fls --version
 
 `--clip` demande un outil de presse-papiers : `wl-clipboard`, `xclip`/`xsel` (Linux) ou `pbcopy` (macOS).
 
+Les directives structurelles `@find_ast` / `@edit_ast` demandent en plus [`ast-grep`](https://ast-grep.github.io/) ≥ 0.51 (`npm i -g @ast-grep/cli`, `cargo install ast-grep --locked` ou `brew install ast-grep`). Le reste de `fls` fonctionne sans lui.
+
 ## Utilisation
 
 ```bash
@@ -50,7 +52,18 @@ cd ~/DEV/projet && fls --clip
 
 ### Directives
 
-Lecture : `@tree`, `@read`, `@grep`, `@stat`, `@history`, `@note`. Écriture : `@edit`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`. Vérifications : `@expect_exists`, `@expect_missing`, `@expect_contains`. Détail : `fls help <directive>`, syntaxe complète : `fls spec` (et [SPEC.md](SPEC.md)).
+Lecture : `@tree`, `@read`, `@grep`, `@find_ast`, `@stat`, `@history`, `@note`. Écriture : `@edit`, `@edit_ast`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`. Vérifications : `@expect_exists`, `@expect_missing`, `@expect_contains`. Détail : `fls help <directive>`, syntaxe complète : `fls spec` (et [SPEC.md](SPEC.md)).
+
+### Recherche structurelle : `@find_ast` / `@edit_ast` (optionnel)
+
+**Quand l’utiliser** : préfère `@grep`/`@edit` pour du texte exact. Utilise `@find_ast`/`@edit_ast` quand la **structure du code** compte (appels, arguments, JSX, imports, wrappers, signatures) et que regex/espaces/guillemets/multi-ligne rendent le texte fragile. Prérequis : `ast-grep` ≥ 0.51 installé.
+
+```
+@find_ast "console.log($ARG)" src --lang ts --context 2
+@edit_ast "console.log($ARG)" src --lang ts --all --rewrite "logger.info($ARG)"
+```
+
+`$ARG` capture un nœud, `$$$ARGS` zéro ou plusieurs. `@edit_ast` est **unique par défaut** (`ambiguous_match` sinon) ; `--all` ou `--first` tranchent. Le remplacement peut être inline (`--rewrite`) ou dans un bloc `<<<<<<< REWRITE` / `>>>>>>> END`. Pour un dossier, `--lang` est obligatoire ; `--lang auto` laisse ast-grep déduire par fichier (et active les injections JS/CSS dans HTML). Les directives AST lisent le disque au début du run : ne pas les mélanger avec des écritures sur les mêmes fichiers dans un même script.
 
 ### Répéter, paramétrer : la syntaxe `@fls 2`
 
@@ -95,7 +108,7 @@ Une vérification qui échoue fait ignorer les écritures suivantes (les lecture
 
 ### Sûreté
 
-- `--dry-run` simule sans rien écrire ; chaque `@edit` est atomique et son SEARCH doit être unique.
+- `--dry-run` simule sans rien écrire ; chaque `@edit` est atomique et son SEARCH doit être unique ; `@edit_ast` est unique par défaut.
 - `@mkdir` crée des dossiers vides ; `undo` retire ceux qui sont restés vides.
 - `fls log` liste les runs, `fls undo [--run <id>] [--force]` annule ; le journal est dans `.fls/` (`fls init` le met dans `.gitignore`).
 - Chemins confinés au dossier courant ; liens symboliques, binaires et fichiers trop gros refusés.

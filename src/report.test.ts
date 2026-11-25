@@ -20,7 +20,7 @@ const opts = (o: Partial<StyleOptions> = {}): StyleOptions => ({ highlighter: ma
 /** Le rendu stylé sérialisé en ANSI 24 bits. */
 const renderStyled = async (d: ReportDoc, o: StyleOptions): Promise<string> => toAnsi(await layout(d, o), 3).text;
 const entry = (kind: string, body: Segment[], over: Partial<Entry> = {}): Entry => ({ status: "OK", kind, title: "t", code: "", body, ...over });
-const doc = (entries: Entry[]): ReportDoc => ({ header: "fls 1.4.0 | run r1 | /x | 2026", entries, footer: ["Résumé : 1 OK, 0 FAIL, 0 SKIP", "Modifiés : aucun"] });
+const doc = (entries: Entry[]): ReportDoc => ({ header: "fls 1.5.0 | run r1 | /x | 2026", entries, footer: ["Résumé : 1 OK, 0 FAIL, 0 SKIP", "Modifiés : aucun"] });
 const file = (over: Partial<Extract<Segment, { kind: "file" }>> = {}): Segment => ({ kind: "file", path: "a.ts", from: 1, total: 2, ranged: false, numbered: false, lines: ["un", "deux"], ...over });
 const rowsWithBg = (out: string): string[] => out.split("\n").filter((l) => l.includes(BG));
 
@@ -71,7 +71,7 @@ describe("rendu brut (SPEC §8)", () => {
     ]);
     expect(renderPlain(d)).toBe(
       [
-        "fls 1.4.0 | run r1 | /x | 2026",
+        "fls 1.5.0 | run r1 | /x | 2026",
         "",
         "[1] OK    READ d (dossier, 1 fichier(s))\nd/\n└── a.ts\n\n=== a.ts (2 lignes) ===\nun\ndeux\n=== fin ===",
         "",
@@ -96,7 +96,7 @@ describe("rendu stylé : structure", () => {
     for (const l of out.split("\n").filter((x) => !x.includes(BG))) expect(l).not.toContain("48;2;");
     expect(strip(out)).toContain("=== a.ts (2 lignes) ===");
     expect(strip(out)).toContain("=== fin ===");
-    expect(strip(out).startsWith("fls 1.4.0 | run r1")).toBe(true);
+    expect(strip(out).startsWith("fls 1.5.0 | run r1")).toBe(true);
     expect(strip(out).endsWith("Modifiés : aucun\n")).toBe(true);
   });
 
@@ -220,6 +220,13 @@ describe("rendu stylé : grep et diff", () => {
     expect(del).toHaveLength(2);
     expect(add).toHaveLength(2);
     for (const l of [...del, ...add]) expect(l.endsWith(EOL)).toBe(true);
+  });
+
+  it("diff multi-fichiers : le nom du fichier apparaît dans l'en-tête de hunk", async () => {
+    const diff: Segment = { kind: "diff", hunks: [{ block: 1, line: 3, file: "src/a.ts", removed: ["old"], added: ["new"] }] };
+    const out = await renderStyled(doc([entry("EDIT_AST", [diff])]), opts());
+    expect(plain(out)).toContain("@@ bloc 1 (src/a.ts:3)");
+    expect(plain(out)).toContain("- old\n+ new\n");
   });
 
   it("diff : lignes longues repliées avec retrait de deux colonnes", async () => {

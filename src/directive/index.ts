@@ -7,6 +7,8 @@ import { create } from "./create.ts";
 import { del } from "./delete.ts";
 import { edit } from "./edit.ts";
 import { expectContains, expectExists, expectMissing } from "./expect.ts";
+import { editAst } from "./edit_ast.ts";
+import { findAst } from "./find_ast.ts";
 import { grep } from "./grep.ts";
 import { history } from "./history.ts";
 import { mkdir } from "./mkdir.ts";
@@ -18,6 +20,6 @@ import { stat } from "./stat.ts";
 import { tree } from "./tree.ts";
 import { write } from "./write.ts";
 
-export const DIRECTIVES: Spec[] = [tree, read, grep, stat, history, note, expectExists, expectMissing, expectContains, edit, create, overwrite, write, append, mkdir, copy, del, move];
+export const DIRECTIVES: Spec[] = [tree, read, grep, findAst, stat, history, note, expectExists, expectMissing, expectContains, edit, editAst, create, overwrite, write, append, mkdir, copy, del, move];
 
 export const SPEC_BY_NAME: Map<string, Spec> = new Map(DIRECTIVES.map((d) => [d.name, d]));

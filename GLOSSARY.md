@@ -2,6 +2,12 @@
 
 **Directive** — Instruction d'un script fls (`@read`, `@grep`, `@edit`…), une par ligne, éventuellement suivie d'un bloc.
 
+**Directive structurelle** — `@find_ast` / `@edit_ast` : le motif est un fragment de code interprété par ast-grep (`$X` pour un nœud, `$$$X` pour zéro ou plusieurs), pas une expression régulière. ast-grep calcule les matches ; fls valide les chemins et écrit.
+
+**Match AST** — Occurrence renvoyée par ast-grep : un fichier, une plage d'octets UTF-8 et le texte exact du nœud. `@find_ast` l'affiche ; `@edit_ast` le remplace.
+
+**Bloc REWRITE** — Bloc `<<<<<<< REWRITE` / `>>>>>>> END` qui porte le remplacement de `@edit_ast` (vide = suppression). Équivalent à l'option `--rewrite` pour une seule ligne ; les deux sont exclusifs.
+
 **Script source** — Script écrit avec la syntaxe v2 (il commence par `@fls 2`) : variables, boucles, conditions, macros, interpolation. Il n'est jamais exécuté tel quel ; l'Expansion le transforme en Script plat.
 
 **Expansion** — Phase qui transforme un Script source en Script plat, avant toute exécution, en lisant le disque tel qu'il est au départ (jamais l'état simulé par le script). `fls expand` l'affiche.
@@ -20,7 +26,7 @@
 
 **Entrée** — Ce que le Rapport dit d'une directive exécutée (le `[n] OK READ …` et son corps). À ne pas confondre avec la directive elle-même.
 
-**Segment** — Partie typée du corps d'une entrée : texte, fichier lu, fichier omis, occurrences de `@grep`, diff de `@edit`. Les deux rendus partent des segments ; rien n'est reparsé.
+**Segment** — Partie typée du corps d'une entrée : texte, fichier lu, fichier omis, occurrences de `@grep` / `@find_ast`, diff de `@edit` / `@edit_ast`. Les deux rendus partent des segments ; rien n'est reparsé.
 
 **Rendu brut** — Le texte du Rapport défini par `SPEC.md` §8. C'est le contrat : il ne change pas d'un octet.
 

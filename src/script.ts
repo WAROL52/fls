@@ -18,6 +18,8 @@ export const M = {
   replaceClose: ">>>>>>> REPLACE",
   contentOpen: "<<<<<<< CONTENT",
   contentClose: ">>>>>>> END",
+  rewriteOpen: "<<<<<<< REWRITE",
+  rewriteClose: ">>>>>>> END",
 };
 
 export const nextNonBlank = (lines: string[], from: number): number => {
@@ -64,10 +66,21 @@ function readContent(lines: string[], start: number, op: Op, v2: boolean): Block
   return { next: body.next, templated: [templated] };
 }
 
+/** Bloc REWRITE optionnel : son absence laisse la place à l'option `--rewrite`. */
+function readRewrite(lines: string[], start: number, op: Op, _v2: boolean): BlockRead {
+  const i = nextNonBlank(lines, start);
+  if (lines[i] !== M.rewriteOpen) return { next: start, templated: [] };
+  const body = takeUntil(lines, i + 1, M.rewriteClose, op.line);
+  op.rewriteBlock = true;
+  op.content = body.body.join("\n");
+  return { next: body.next, templated: [] };
+}
+
 export const BLOCK_READERS: Record<Spec["block"], (lines: string[], start: number, op: Op, v2: boolean) => BlockRead> = {
   none: (_lines, start) => ({ next: start, templated: [] }),
   edit: readEdits,
   content: readContent,
+  rewrite: readRewrite,
 };
 
 const optionName = (spec: Spec, tok: Token): string | null => {
@@ -176,6 +189,7 @@ const BLOCK_WRITERS: Record<Spec["block"], (op: Op) => string[]> = {
   none: () => [],
   edit: (op) => op.edits.flatMap((e) => [M.searchOpen, ...blockLines(e.search), M.sep, ...blockLines(e.replace), M.replaceClose]),
   content: (op) => [M.contentOpen, ...blockLines(op.content.replace(/\n$/, "")), M.contentClose],
+  rewrite: (op) => (op.rewriteBlock === true ? [M.rewriteOpen, ...blockLines(op.content), M.rewriteClose] : []),
 };
 
 export function serializeOp(op: Op): string {

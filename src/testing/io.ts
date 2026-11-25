@@ -23,6 +23,7 @@ export interface FakeOpts {
   columns?: number;
   cacheDir?: string;
   highlighter?: Highlighter;
+  runner?: fls.Runner;
 }
 
 const dirs: string[] = [];
@@ -91,6 +92,7 @@ export function fake(cwd: string, o: FakeOpts = {}) {
     columns: o.columns,
     cacheDir: o.cacheDir,
     highlighter: o.highlighter,
+    ...(o.runner === undefined ? {} : { runner: o.runner }),
   };
   return { io, out, err, clip };
 }

@@ -20,6 +20,8 @@ export interface Op {
   opts: Record<string, string | true>;
   edits: Edit[];
   content: string;
+  /** Un bloc `<<<<<<< REWRITE` était présent (même vide : suppression du match). */
+  rewriteBlock?: boolean;
 }
 
 /** Ce que renvoie une directive : le titre de son entrée et le corps (segments typés). */
@@ -52,6 +54,10 @@ export interface Ctx {
   ignore: Ignore;
   /** Le Journal du dossier courant (lu par `@history`). */
   journal: Journal;
+  /** Exécution de processus externes (ast-grep) ; injectable pour les tests. */
+  runner: Runner;
+  /** Variables d'environnement (FLS_AST_GREP). */
+  env: Record<string, string | undefined>;
   /** Chemin absolu de --output, pour marquer `[output file]` en mode tree. */
   output?: string | null;
 }
@@ -61,9 +67,16 @@ export interface Clipboard {
   write(text: string): void;
 }
 
+export interface ExecResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
 export interface Runner {
   capture(cmd: string, args: string[]): string | null;
   feed(cmd: string, args: string[], text: string): boolean;
+  exec(cmd: string, args: string[], opts?: { cwd?: string; env?: Record<string, string | undefined> }): ExecResult;
 }
 
 export interface Io {
@@ -80,6 +93,8 @@ export interface Io {
   newId(now: Date): string;
   /** Dossier où `fls last` mémorise la dernière sortie (absent : pas de mémorisation). */
   cacheDir?: string;
+  /** Runner injectable (ast-grep) ; `realRunner` par défaut. */
+  runner?: Runner;
   /** Largeur du terminal (stdout) quand c'est un terminal : sert à replier les lignes longues. */
   columns?: number;
   /** Coloration syntaxique (Shiki par défaut) : injectable pour les tests. */
@@ -102,7 +117,7 @@ export interface Spec {
   options: Record<string, "flag" | "value">;
   aliases: Record<string, string>;
   positional: [number, number];
-  block: "none" | "edit" | "content";
+  block: "none" | "edit" | "content" | "rewrite";
   writes: boolean;
   /** Vérification : un échec bloque (SKIP) les écritures suivantes, sans rien annuler. */
   guard: boolean;

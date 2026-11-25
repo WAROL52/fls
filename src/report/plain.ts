@@ -20,7 +20,9 @@ export function renderSegment(s: Segment): string {
     case "matches":
       return s.rows.map(matchRow).join("\n");
     case "diff":
-      return s.hunks.flatMap((h) => [`@@ bloc ${h.block} (ligne ${h.line})`, ...h.removed.map((l) => `- ${l}`), ...h.added.map((l) => `+ ${l}`)]).join("\n");
+      return s.hunks
+        .flatMap((h) => [`@@ bloc ${h.block} (${h.file === undefined ? "" : `${h.file}:`}ligne ${h.line})`, ...h.removed.map((l) => `- ${l}`), ...h.added.map((l) => `+ ${l}`)])
+        .join("\n");
   }
 }
 

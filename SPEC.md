@@ -1,6 +1,6 @@
 # SPEC — fls v1
 
-Spécification du comportement de `fls.ts` (version `1.4.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
+Spécification du comportement de `fls.ts` (version `1.5.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
 
 Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lancement : `node fls.ts …` (ou un alias vers ce fichier).
 
@@ -83,7 +83,7 @@ Option inconnue, valeur manquante ou nombre invalide : `usage_error`, code de so
 
 Pour qu'un script puisse être collé tel quel dans un shell (où `#…` est un commentaire) puis relu par `fls --clip` :
 
-- **`#@nom …`** (le `@` collé au `#`, suivi d'une lettre) est strictement équivalent à `@nom …` et se mélange librement avec la forme `@`. Limité aux directives de **lecture** (`tree`, `read`, `grep`, `note`) : une directive d'écriture donne `syntax_error` (« les directives d'écriture exigent la forme `@nom` »), car leurs blocs ne sont pas des commentaires pour le shell. `#@` suivi d'un nom inconnu : `syntax_error`. `#@ texte` (espace) et `# @read` restent des commentaires.
+- **`#@nom …`** (le `@` collé au `#`, suivi d'une lettre) est strictement équivalent à `@nom …` et se mélange librement avec la forme `@`. Limité aux directives de **lecture** (`tree`, `read`, `grep`, `find_ast`, `stat`, `history`, `note`, vérifications) : une directive d'écriture donne `syntax_error` (« les directives d'écriture exigent la forme `@nom` »), car leurs blocs ne sont pas des commentaires pour le shell. `#@` suivi d'un nom inconnu : `syntax_error`. `#@ texte` (espace) et `# @read` restent des commentaires.
 - **Zone clip** : si le script contient au moins une ligne `clip start` (regex `^\s*#{3,}\s*clip\s+(start|end)\s*#*\s*$`, insensible à la casse, ex. `##### clip start #####`), seules les lignes situées entre `clip start` et `clip end` sont analysées (jusqu'à la fin si `clip end` manque). Plusieurs zones sont concaténées dans l'ordre ; tout le reste (texte avant, entre, après, y compris `cd … && fls --clip`) est ignoré. Sans marqueur `clip start`, aucun changement. La numérotation des lignes des erreurs reste celle du texte complet.
 - `fls expand`, le journal et le rapport écrivent toujours la forme canonique `@nom`.
 
@@ -130,7 +130,15 @@ contenu
 >>>>>>> END
 ```
 
+```
+@edit_ast "motif" [chemin]
+<<<<<<< REWRITE
+remplacement
+>>>>>>> END
+```
+
 - `@edit` exige au moins un bloc ; `SEARCH` ne peut pas être vide (pour créer un fichier : `@create`).
+- `@edit_ast` accepte un bloc `REWRITE` **ou** l'option `--rewrite "…"`, pas les deux. Un bloc vide supprime le match ; sans bloc ni `--rewrite` : `invalid_argument`.
 - Le premier `=======` après `SEARCH` sépare les deux moitiés ; le premier `>>>>>>> REPLACE` (resp. `>>>>>>> END`) termine le bloc. Marqueur manquant : `syntax_error`.
 - Des lignes vides sont admises entre la directive et son premier bloc, et entre les blocs.
 - Le contenu d'un bloc `CONTENT` se termine par un retour à la ligne s'il comporte au moins une ligne ; un bloc vide produit un fichier vide.
@@ -205,6 +213,16 @@ Un chemin explicite n'est **jamais filtré** par les règles d'ignore (mode norm
 
 Recherche littérale (ou `--regex`) ligne par ligne, dans un fichier ou récursivement dans un dossier (défaut `.`, ignores appliqués, fichiers illisibles sautés). Sortie : `fichier:ligne: texte` pour une correspondance, `fichier-ligne- texte` pour une ligne de contexte, et `--` entre deux groupes non contigus (y compris entre fichiers). Titre : `"texte" dans chemin (N correspondance(s) dans M fichier(s))`. Aucune correspondance n'est **pas** une erreur. Sur un fichier explicite, une erreur de lecture est remontée. `--regex` invalide : `invalid_argument`.
 
+### `@find_ast "<motif>" [chemin] [--lang <langage>|auto] [--context N]`
+
+Recherche **structurelle** déléguée à `ast-grep` (binaire externe optionnel, §12) : le motif est un fragment de code, pas une expression régulière. `$X` capture un nœud, `$$$X` capture zéro ou plusieurs nœuds, `$_` ignore un nœud. Exemples : `console.log($ARG)`, `useEffect($$$ARGS)`, `function $F($$$P) { $$$B }`.
+
+- Chemin par défaut : `.`. Les fichiers ignorés (§7) sont exclus et les chemins renvoyés par ast-grep sont validés (fichier ordinaire, dans le dossier, UTF-8, taille).
+- **Langage** : déduit de l'extension pour un fichier unique ; **obligatoire** pour un dossier (`ast_grep_lang_required`). `--lang auto` laisse ast-grep déduire **par fichier** et active les injections HTML intégrées (JS/CSS dans `<script>` / `<style>`) ; un fichier `.html`/`.htm` sans `--lang` utilise déjà ce mode.
+- Sortie : comme `@grep` (`fichier:ligne: texte`, `fichier-ligne- texte` pour le contexte, `--` entre groupes). Un match multi-ligne affiche toutes ses lignes. Aucune correspondance n'est **pas** une erreur.
+- `@find_ast` est une lecture : `#@find_ast` est accepté, aucun run n'est créé.
+- Erreurs : `ast_grep_unavailable` (binaire absent), `ast_grep_version` (version < 0.51.0), `ast_grep_failed` (motif invalide, sortie illisible, offsets incohérents), `ast_grep_stale` (fichier déjà modifié dans ce script, §6), `ast_grep_lang_required`.
+
 ### `@note "<texte>"`
 
 Recopie le texte dans le rapport (`NOTE texte`). Utile pour annoter les étapes d'un script.
@@ -221,6 +239,17 @@ Remplace du texte existant. Règles :
 6. **Atomique** : si un bloc échoue, le fichier n'est pas modifié.
 
 Rapport : `EDIT chemin (K bloc(s), +ajoutées -retirées)` puis, par bloc, `@@ bloc k (ligne L)`, les lignes retirées préfixées `- ` et les lignes ajoutées préfixées `+ `.
+
+### `@edit_ast "<motif>" [chemin] [--lang <langage>|auto] [--all | --first] [--rewrite "…"]` + bloc REWRITE
+
+Réécriture **structurelle** : ast-grep calcule les matches et leurs remplacements, fls valide puis écrit via le Workspace (donc `--dry-run`, journal et `undo` fonctionnent, et aucun fichier hors dossier n'est touché). Le remplacement utilise la syntaxe ast-grep (`$X`, `$$$X`).
+
+- **Unique par défaut** : plusieurs matches → `ambiguous_match` avec jusqu'à 5 positions `fichier:ligne` ; `--all` les applique tous, `--first` seulement le premier (ordre fichier puis position). `--all` et `--first` sont exclusifs.
+- Remplacement : bloc `REWRITE` (multi-ligne, vide = suppression) ou `--rewrite "…"` (une ligne), jamais les deux. Un seul des deux est obligatoire.
+- **Atomique** : tous les offsets (octets UTF-8), textes et chevauchements sont validés pour tous les fichiers avant la première écriture ; un fichier modifié entre-temps donne `conflict`. Les fichiers inchangés ne sont pas réécrits.
+- `--lang` : mêmes règles que `@find_ast` (obligatoire pour un dossier, `auto` pour la déduction par fichier et les injections HTML).
+- Les directives AST lisent le disque **au début du run** ; un fichier déjà modifié par une directive précédente du même script donne `ast_grep_stale` (§6).
+- Rapport : `EDIT_AST "motif" dans chemin (K remplacement(s), M fichier(s))` puis un diff multi-fichiers, un bloc par match : `@@ bloc k (fichier:ligne)`, lignes retirées `- ` et ajoutées `+ `.
 
 ### Écritures de fichiers entiers
 
@@ -262,7 +291,8 @@ Constatent un fait sur l'état simulé (un `@expect_contains` après un `@edit` 
 ## 6. Sémantique d'exécution
 
 - **Surcouche en mémoire** : toutes les directives lisent et écrivent un état simulé au-dessus du disque. Un `@read` ou un `@tree` après une écriture voit le résultat ; un dossier créé virtuellement apparaît dans l'arbre.
-- **Politique d'échec** : un `FAIL` sur une directive d'**écriture** (`@edit`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`) ou sur une **vérification** (`@expect_*`) fait passer les écritures suivantes en `SKIP` (code `skipped`) ; les lectures continuent. Un `FAIL` sur une lecture ne bloque rien.
+- **Exception AST** : `@find_ast` et `@edit_ast` délèguent à un binaire externe qui lit le disque **au début du run**. Les fichiers modifiés par une directive précédente du même script ne sont donc pas visibles ; si ast-grep renvoie un de ces fichiers, la directive échoue avec `ast_grep_stale` (jamais de résultat ou d'écriture sur une base périmée). Les écritures calculées passent ensuite par le Workspace : dry-run, journal et undo restent valables.
+- **Politique d'échec** : un `FAIL` sur une directive d'**écriture** (`@edit`, `@edit_ast`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`) ou sur une **vérification** (`@expect_*`) fait passer les écritures suivantes en `SKIP` (code `skipped`) ; les lectures continuent. Un `FAIL` sur une lecture ne bloque rien.
 - **Commit** (hors `--dry-run`) : seuls les changements **effectifs** sont écrits (un fichier recréé à l'identique, ou créé puis supprimé dans le même script, n'est pas un changement). Chaque fichier est écrit dans un fichier temporaire `<chemin>.fls-tmp` puis renommé (atomique), avec ses permissions d'origine (644 pour un nouveau fichier).
 - **Conservation** : fins de ligne, BOM et permissions sont préservés ; un fichier non UTF-8 valide est refusé (`not_utf8`), comme un binaire (octet nul dans les 8000 premiers octets : `binary_file`) ou un fichier de plus de `--max-size` octets (`too_large`).
 
@@ -270,12 +300,12 @@ Constatent un fait sur l'état simulé (un `@expect_contains` après un `@edit` 
 
 - **Confinement** : un chemin absolu, un chemin qui remonte au-dessus du dossier courant, ou qui traverse un lien symbolique menant hors de ce dossier : `outside_workspace`.
 - **Liens symboliques** : jamais suivis ni modifiés ; listés `nom -> cible` ; `[omis : symlink]` dans une lecture de dossier.
-- **Règles d'ignore** (pour `@tree`, `@read <dossier>` sans `--tree`, `@grep <dossier>`) : toujours `.git/`, `node_modules/`, `.fls/` ; plus les lignes de `.gitignore` et `.flsignore` à la racine, plus `--ignore`. Syntaxe reconnue : lignes vides et `#` ignorées ; `*`, `**`, `?` ; `/` final = dossiers seulement ; un motif contenant `/` est ancré sur le chemin relatif à la racine, sinon il s'applique au nom à toute profondeur. Les lignes de négation `!` sont ignorées. `@read --tree` / `fls --tree` n'applique aucun ignore.
+- **Règles d'ignore** (pour `@tree`, `@read <dossier>` sans `--tree`, `@grep <dossier>`, `@find_ast <dossier>`, `@edit_ast <dossier>`) : toujours `.git/`, `node_modules/`, `.fls/` ; plus les lignes de `.gitignore` et `.flsignore` à la racine, plus `--ignore`. Syntaxe reconnue : lignes vides et `#` ignorées ; `*`, `**`, `?` ; `/` final = dossiers seulement ; un motif contenant `/` est ancré sur le chemin relatif à la racine, sinon il s'applique au nom à toute profondeur. Les lignes de négation `!` sont ignorées. ast-grep applique en plus ses propres règles (`.gitignore`) ; fls revalide chaque chemin renvoyé. `@read --tree` / `fls --tree` n'applique aucun ignore.
 
 ## 8. Rapport
 
 ```
-fls 1.4.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
+fls 1.5.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
 
 [1] OK    TREE src
 …
@@ -349,26 +379,45 @@ Un run qui ne fait que créer des dossiers est un run (`Modifiés : d/`).
 | `run_not_found` / `already_undone` / `nothing_to_undo` / `conflict` | journal et `undo` |
 | `no_last_output` | `fls last` : aucune sortie mémorisée |
 | `clipboard_unavailable` | aucun outil de presse-papiers |
+| `ast_grep_unavailable` | binaire `ast-grep` absent (commande d'installation dans le message) |
+| `ast_grep_version` | version d'`ast-grep` < 0.51.0 ou illisible |
+| `ast_grep_failed` | motif refusé, sortie JSON illisible, offsets invalides ou chevauchement |
+| `ast_grep_lang_required` | dossier ou extension inconnue sans `--lang` |
+| `ast_grep_stale` | fichier déjà modifié dans ce script : la lecture disque d'ast-grep serait périmée |
 
 ## 11. Presse-papiers
 
 Premier outil qui réussit, dans l'ordre : `wl-paste` / `wl-copy`, `xclip -selection clipboard`, `xsel --clipboard`, `pbpaste` / `pbcopy`, `powershell.exe Get-Clipboard` / `clip.exe` (WSL). Aucun : `clipboard_unavailable`. Les écritures redirigent la sortie standard et d'erreur de l'outil vers rien, pour ne pas bloquer sur les outils qui restent en arrière-plan (`wl-copy`, `xclip`).
 
-## 12. Limites connues de la v1
+## 12. ast-grep (directives structurelles, depuis 1.5.0)
+
+`@find_ast` et `@edit_ast` s'appuient sur le binaire **`ast-grep`** (jamais `sg`, qui est shadow-utils sur Linux). Il est **optionnel** : le reste de fls fonctionne sans lui.
+
+- **Résolution** : `FLS_AST_GREP` (chemin explicite), puis `node_modules/.bin/ast-grep` du projet, puis `ast-grep` du `PATH`. La version est vérifiée une fois par directive ; minimum **0.51.0**.
+- **Installation** : `npm i -g @ast-grep/cli`, `cargo install ast-grep --locked`, `brew install ast-grep`, ou un binaire des releases GitHub.
+- **Appel** : `ast-grep run --pattern <motif> [--lang <langage>] --json=stream --color never [--rewrite <texte>] -- <chemin>`. `--json=stream` évite de charger tous les matches en mémoire ; `--update-all` n'est **jamais** utilisé. Un code de sortie `1` signifie « aucun match », pas une erreur.
+- **Calcul et écriture séparés** : ast-grep fournit `text`, `range.byteOffset` (octets UTF-8) et `replacement` ; fls valide chaque fichier (confinement, lien, ignore, UTF-8, taille), vérifie que les octets correspondent au match, détecte les chevauchements, puis écrit via le `Workspace`. Le dry-run, le journal et `undo` restent donc valables.
+- **Langage** : un fichier unique déduit son langage de son extension ; un dossier exige `--lang`. `--lang auto` laisse ast-grep déduire par fichier (et active les injections HTML JS/CSS) ; `.html`/`.htm` sans `--lang` utilise déjà ce mode.
+- **État lu** : ast-grep lit le disque au début du run. Un fichier modifié plus tôt dans le script donne `ast_grep_stale` s'il est renvoyé ; c'est volontaire (pas de résultat ni d'écriture sur une base périmée).
+- **Non exposé en 1.5** : `--rule` / `sgconfig.yml`, `scan`, les transformations YAML et les règles de projet. Seuls les motifs `run --pattern` sont disponibles.
+
+## 13. Limites connues
 
 - Pas de repli sur les espaces de fin de ligne : la correspondance de SEARCH est exacte (aux fins de ligne CRLF/LF près).
 - `@delete`, `@move` et `@copy` ne gèrent pas les dossiers ; pas de globs ni de `--all`.
 - `undo` ne supprime que les dossiers créés par `@mkdir` et restés vides ; il ne protège que les fichiers touchés par le run.
 - Un chemin dont un parent est un fichier est traité comme absent en lecture et refusé en écriture (`not_a_directory`).
 - Pas de Windows natif (chemins POSIX uniquement).
-- Aucune syntaxe de programmation : la v2 produira, par une phase d'expansion préalable, le script plat décrit ici.
+- Pas de `--rule` ni de `sgconfig.yml` pour ast-grep : seuls les motifs `--pattern` sont exposés en 1.5.
+- Les directives AST lisent le disque au début du run : ne pas les mélanger avec des écritures sur les mêmes fichiers dans un même script (`ast_grep_stale`).
 
-## 13. Architecture et tests
+## 14. Architecture et tests
 
 - **Entrées/sorties injectées** (`Io` : dossier courant, entrée standard, sorties, presse-papiers, horloge, identifiant) ; `main(argv, io)` renvoie le code de sortie. Le vrai `Io` n'est construit qu'au chargement du module, et le démarrage passe par `bootstrap(isEntry(...), start)`, entièrement testable.
 - **Tables** plutôt que chaînes de `if` : directives (`DIRECTIVES`, utilisées par le parseur, l'aide et la spec), sous-commandes, options globales, lecteurs/écrivains de blocs, vérifications d'écriture, outils de presse-papiers.
-- **Modules** : `src/fls.ts` (parseur, exécution, aide, CLI), `src/journal.ts` (le Journal : format de `.fls/runs/<id>/`, enregistrement, liste, relecture, annulation avec détection des conflits ; il renvoie des données, `fls.ts` construit les rapports de `log` et `undo`), `src/tree.ts` (lecture d'un arbre en **structure** `TreeNode` — dossiers, fichiers avec leurs lignes, liens — et sortie brute façon treecat produites par un seul parcours : `walkTree`, `treeText`) et `src/report/tree-styled.ts` (rendu stylé d'un `--tree`, qui parcourt la structure), `src/output.ts` (livraison d'une sortie à ses **destinations** : terminal, fichier de `--output`, presse-papiers ; chacune porte sa couleur, sa largeur et sa limite, et le Rapport n'est rendu qu'une fois par jeu d'options), `src/last.ts` (Dernière sortie), `src/args.ts`, `src/version.ts`, `src/style.ts` (le texte stylé comme donnée : spans, lignes, couleurs dégradées, palette, repli), `src/ansi.ts` (le seul sérialiseur ANSI, avec la limite de `--max-output-chars`), `src/highlight.ts` (coloration syntaxique Shiki, renvoie des spans), `src/report/` (le Rapport comme donnée : `segments.ts` types `Segment` / `Entry` / `ReportDoc`, `plain.ts` rendu brut, `styled.ts` rendu stylé en lignes stylées, `code-block.ts` gouttière et repli, `snapshot.ts` copie versionnée de la Dernière sortie), `src/script.ts` (parseur et sérialiseur du script plat), `src/expand/` (la syntaxe v2 : `values.ts`, `expr.ts` expressions, `builtins.ts` fonctions intégrées, `template.ts` interpolation, `expand.ts` l'expansion en Script plat), `src/directive/<nom>.ts` (une `Spec` par directive ; `expect.ts` en regroupe trois, assemblées par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
+- **Modules** : `src/fls.ts` (parseur, exécution, aide, CLI), `src/journal.ts` (le Journal : format de `.fls/runs/<id>/`, enregistrement, liste, relecture, annulation avec détection des conflits ; il renvoie des données, `fls.ts` construit les rapports de `log` et `undo`), `src/tree.ts` (lecture d'un arbre en **structure** `TreeNode` — dossiers, fichiers avec leurs lignes, liens — et sortie brute façon treecat produites par un seul parcours : `walkTree`, `treeText`) et `src/report/tree-styled.ts` (rendu stylé d'un `--tree`, qui parcourt la structure), `src/output.ts` (livraison d'une sortie à ses **destinations** : terminal, fichier de `--output`, presse-papiers ; chacune porte sa couleur, sa largeur et sa limite, et le Rapport n'est rendu qu'une fois par jeu d'options), `src/last.ts` (Dernière sortie), `src/args.ts`, `src/version.ts`, `src/style.ts` (le texte stylé comme donnée : spans, lignes, couleurs dégradées, palette, repli), `src/ansi.ts` (le seul sérialiseur ANSI, avec la limite de `--max-output-chars`), `src/highlight.ts` (coloration syntaxique Shiki, renvoie des spans), `src/report/` (le Rapport comme donnée : `segments.ts` types `Segment` / `Entry` / `ReportDoc`, `plain.ts` rendu brut, `styled.ts` rendu stylé en lignes stylées, `code-block.ts` gouttière et repli, `snapshot.ts` copie versionnée de la Dernière sortie), `src/script.ts` (parseur et sérialiseur du script plat), `src/expand/` (la syntaxe v2 : `values.ts`, `expr.ts` expressions, `builtins.ts` fonctions intégrées, `template.ts` interpolation, `expand.ts` l'expansion en Script plat), `src/directive/<nom>.ts` (une `Spec` par directive ; `expect.ts` en regroupe trois, `ast.ts` porte la résolution d'`ast-grep`, le parsing JSON et l'application des offsets, assemblés par `src/directive/index.ts`), et les modules de base `types.ts`, `errors.ts`, `text.ts`, `paths.ts`, `workspace.ts`.
 - **`Workspace`** : surcouche en mémoire au-dessus du disque ; le dry-run et l'exécution réelle partagent tout le code, seul `apply` (commit) diffère.
+- **Dépendance externe optionnelle** : seules les directives AST appellent un processus (`ast-grep`) ; le reste de fls tient dans un binaire unique (Shiki inclus). Le `Runner` est injecté pour les tests, comme les autres E/S.
 - **Syntaxe TypeScript effaçable uniquement** (ni `enum` ni propriétés de paramètre) : `node src/fls.ts` suffit.
 
 Lancer les tests (à la racine du projet) :

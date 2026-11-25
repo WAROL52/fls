@@ -1,6 +1,6 @@
 ---
 name: fls
-description: Apprendre à utiliser fls (CLI qui lit et modifie des fichiers en une seule commande, sans interaction) et à l'installer. À utiliser dès que l'utilisateur mentionne fls, un script @read / @edit / @grep / @note / @create / @write, la syntaxe collable `#@` avec `fls --clip`, `fls undo`, `fls last`, `/fls on|off|init|status`, ou veut lire/modifier plusieurs fichiers d'un coup, annuler un run, installer ou mettre à jour fls, même s'il ne dit pas « fls » explicitement.
+description: Apprendre à utiliser fls (CLI qui lit et modifie des fichiers en une seule commande, sans interaction) et à l'installer. À utiliser dès que l'utilisateur mentionne fls, un script @read / @edit / @grep / @find_ast / @edit_ast / @note / @create / @write, la syntaxe collable `#@` avec `fls --clip`, `fls undo`, `fls last`, `/fls on|off|init|status`, ou veut lire/modifier plusieurs fichiers d'un coup, annuler un run, installer ou mettre à jour fls, même s'il ne dit pas « fls » explicitement.
 ---
 
 # fls
@@ -27,7 +27,7 @@ pnpm run build:install     # compile avec bun, installe ~/.local/share/fls/fls +
 fls --version
 ```
 
-Le script ajoute `~/.local/bin` au PATH dans `~/.bashrc` : ouvrir un nouveau terminal si `fls` est introuvable. Après toute modification de `src/`, relancer `pnpm run build:install`, sinon le binaire installé reste l'ancien. Désinstaller : `pnpm run uninstall:global`. Presse-papiers (`--clip`) : nécessite `wl-clipboard`, `xclip`/`xsel` (Linux) ou `pbcopy` (macOS) ; sinon erreur `clipboard_unavailable`.
+Le script ajoute `~/.local/bin` au PATH dans `~/.bashrc` : ouvrir un nouveau terminal si `fls` est introuvable. Après toute modification de `src/`, relancer `pnpm run build:install`, sinon le binaire installé reste l'ancien. Désinstaller : `pnpm run uninstall:global`. Presse-papiers (`--clip`) : nécessite `wl-clipboard`, `xclip`/`xsel` (Linux) ou `pbcopy` (macOS) ; sinon erreur `clipboard_unavailable`. Directives structurelles (`@find_ast` / `@edit_ast`) : nécessitent `ast-grep` ≥ 0.51 (`npm i -g @ast-grep/cli`, `cargo install ast-grep --locked` ou `brew install ast-grep`) ; optionnel pour le reste de fls.
 
 ## Les trois façons de lancer un script
 
@@ -63,11 +63,13 @@ cd ~/projet && fls --clip
   texte de remplacement
   >>>>>>> REPLACE
   ```
+- **Quand utiliser AST vs texte** : `@grep`/`@edit` pour du texte/littéral simple, commentaires, Markdown, config, ou quand la forme exacte importe. `@find_ast`/`@edit_ast` quand la structure compte (appels, arguments, JSX, imports, wrappers, signatures) et que regex/espaces/guillemets/multi-ligne rendent `@grep`/`@edit` fragiles. Vérifier d’abord avec `@find_ast`, puis `@edit_ast --dry-run`, puis exécuter. Prérequis : `ast-grep` ≥ 0.51 (`ast-grep --version`, jamais `sg`).
+- **Structure (ast-grep)** : `@find_ast "<motif>" chemin --lang ts [--context N]` ; `@edit_ast "<motif>" chemin --lang ts --all|--first (--rewrite "..." | bloc <<<<<<< REWRITE)`. `$ARG` = un nœud, `$$$ARGS` = zéro ou plusieurs. Dossier = `--lang` obligatoire ; fichier unique = déduit par extension ; `.html/.htm` ou `--lang auto` = déduction/injections HTML JS/CSS. `@edit_ast` est unique par défaut (`ambiguous_match` sinon). Les directives AST lisent le disque au début du run : les placer avant les écritures sur les mêmes fichiers, sinon `ast_grep_stale`. **Lire `references/ast-grep.md` avant le premier motif non trivial.**
 - **Garder avant d'écrire** : `@expect_exists`, `@expect_missing`, `@expect_contains <fichier> "texte" [--regex] [--count N]` constatent un fait sur l'état simulé. Si l'une échoue (`expectation_failed`), les écritures suivantes sont SKIP, les lectures continuent ; ce qui a déjà été écrit n'est pas annulé (`fls undo`). Les placer avant les `@edit` ; après, elles servent à contrôler le résultat. Un texte sur plusieurs lignes ne se cherche qu'avec `--regex`.
 - **Inspecter** : `@stat <chemin>` (type, taille, lignes, droits, sha1) et `@history [chemin] [--limit N]` (runs du Journal, ou ceux qui ont touché un fichier) sont des lectures, utilisables aussi en `#@`.
 - **Structure** : `@mkdir <dossier>` (parents compris, idempotent, annulable s'il reste vide) et `@copy <source> <destination>` (fichiers, droits conservés).
 - **Répéter ou paramétrer** : un script qui commence par `@fls 2` accepte variables, `@for`, `@if`, macros (`@def` / `@call`) et `{{ expr }}` dans les arguments ; il est **étendu en script plat avant d'être exécuté**, sur le disque initial. Les blocs restent littéraux sauf `<<<<<<< TEMPLATE`. Vérifier avec `fls expand` puis `--dry-run`. **Lire `references/syntaxe-v2.md` avant d'écrire ou de corriger un tel script** (motifs, fonctions, pièges).
-- **Relire après écriture** : les directives voient l'état simulé, donc un `@read` placé après un `@edit` montre le résultat dans le même run.
+- **Relire après écriture** : les directives voient l'état simulé, donc un `@read` placé après un `@edit` montre le résultat dans le même run. Exception : `@find_ast` / `@edit_ast` lisent le disque au début du run.
 - **Après un FAIL d'écriture**, les écritures suivantes sont SKIP mais les lectures continuent : lire le rapport en entier avant de relancer.
 - **Annuler** : `fls log` liste les runs, `fls undo` annule le dernier (`--run <id>` pour un précis, `--force` si des fichiers ont changé depuis, sinon `conflict`). Le journal est dans `.fls/` (`fls init` crée `.flsignore` et l'ajoute au `.gitignore`).
 - **Sortie** : `fls last` réaffiche la dernière sortie à la largeur du terminal sans rien réexécuter ; `--colored` / `--no-color` forcent la couleur ; `--output f` écrit le rapport dans un fichier ; `--max-output-chars n` borne la taille.

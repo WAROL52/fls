@@ -38,7 +38,7 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 |---|---|
 | Syntaxe de programmation (variables, boucles, conditions, fonctions) | livrée en 1.4.0 (`@fls 2`), voir l'ADR-0008 |
 | Directives `@copy`, `@mkdir`, `@stat`, `@expect_*`, `@history` | livrées en 1.3.0 |
-| Directives structurelles (ast-grep) | après v2 |
+| Directives structurelles (ast-grep) | livrées en 1.5.0 (`@find_ast` / `@edit_ast`) |
 | Snippets, codegen, registry de partage | après v2 |
 | `@delete` / `@move` sur des dossiers, `--all` | non planifié ; les globs passent par `glob()` + `@for` (1.4.0) |
 | Sortie JSON, interface TUI/web, Windows natif | non planifié |
@@ -47,7 +47,7 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 
 | # | Exigence |
 |---|---|
-| F1 | Un script s'exécute de haut en bas ; les lectures voient l'état simulé par les écritures précédentes. |
+| F1 | Un script s'exécute de haut en bas ; les lectures voient l'état simulé par les écritures précédentes — sauf `@find_ast` / `@edit_ast`, qui lisent le disque au début du run et refusent un fichier déjà modifié (`ast_grep_stale`). |
 | F2 | `@edit` désigne l'endroit par le texte existant : un SEARCH doit être trouvé **exactement une fois**, sinon échec explicite (avec la ligne la plus proche ou les numéros de ligne). |
 | F3 | Chaque `@edit` est atomique ; les écritures réussies d'un script sont appliquées même si une autre échoue. |
 | F4 | Après un échec d'écriture, les écritures suivantes sont `SKIP` mais les lectures continuent (le rapport reflète l'état réel). |
@@ -62,7 +62,7 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 - **Sécurité** : chemins confinés au dossier courant (absolus, `..` et liens symboliques sortants refusés) ; aucune exécution de commande shell ; liens symboliques jamais suivis ni modifiés.
 - **Robustesse** : écriture atomique (fichier temporaire puis `rename`) ; conservation des fins de ligne (CRLF/LF), du BOM, des permissions ; refus explicite des binaires, des fichiers trop gros et de l'UTF-8 invalide.
 - **Déterminisme** : mêmes entrées, même rapport (hors horodatage et identifiant de run).
-- **Portabilité** : un seul fichier, zéro dépendance hors Node.js, exécutable par `node fls.ts`.
+- **Portabilité** : un seul fichier, zéro dépendance hors Node.js, exécutable par `node fls.ts` ; `ast-grep` est une dépendance externe **optionnelle**, réservée aux directives structurelles.
 - **Qualité** : couverture de tests de 100 % (statements, branches, fonctions, lignes), obtenue par conception (E/S injectées, directives en table, aucun code défensif inatteignable).
 
 ## 7. Décisions de conception clés
@@ -72,6 +72,7 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 3. **Échec partiel assumé** (F3, F4) plutôt que tout-ou-rien : un bloc faux ne doit pas annuler tout le travail, et le rapport dit exactement ce qui a été fait.
 4. **Options longues et noms explicites** (`@create` vs `@overwrite`) : lisibilité pour l'humain et le modèle avant la concision.
 5. **Erreurs à codes stables** (`not_found`, `ambiguous_match`, …) que le modèle peut lire et corriger sans ambiguïté.
+6. **ast-grep calcule, fls écrit** : aucune écriture directe par ast-grep (`--update-all` n'est jamais utilisé) ; ses matches sont revalidés (confinement, ignore, offsets UTF-8) et appliqués via le Workspace, donc dry-run, journal et undo restent la seule voie d'écriture.
 
 ## 8. Critères de succès
 
@@ -89,12 +90,14 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 | Exécuter un script produit par un LLM | Confinement des chemins, pas de shell, `--dry-run`, `expand`, journal et `undo`. |
 | Dérive de périmètre vers un langage complet | La couche de programmation est une expansion séparée qui produit le script plat de la v1 ; pas de fonctions de valeur ni de récursion, pas d'accès hors du disque du projet, plafonds de taille et d'étapes. |
 | `undo` écrase un travail manuel | Détection de conflit par empreinte du contenu écrit ; refus sans `--force`. |
+| ast-grep absent ou trop ancien | Erreur typée `ast_grep_unavailable` / `ast_grep_version` avec la commande d'installation ; le reste de fls fonctionne sans lui. |
+| Un fichier change entre le calcul d'ast-grep et l'écriture | Vérification des octets et des offsets ; `conflict` / `ast_grep_stale`, rien n'est écrit. |
 
 ## 10. Feuille de route
 
 - **v1** (ce document) : directives plates, journal, undo, `--clip`.
 - **v2 (livrée en 1.4.0, `@fls 2`)** : couche de programmation (variables, `@for`, `@if`, macros sans récursion, interpolation `{{ expr }}`, fonctions intégrées en lecture seule), évaluée **en une phase d'expansion** sur l'état initial, qui produit un script plat exécuté par la v1 ; les globs passent par `glob()`. Voir `SPEC.md` §4.6 et l'ADR-0008.
-- **v3** : `@find_ast` / `@edit_ast` (ast-grep : il calcule, fls écrit), snippets et codegen d'infrastructure idempotents, distribution par registry.
+- **v3 (partiellement livrée en 1.5.0)** : `@find_ast` / `@edit_ast` (ast-grep calcule, fls valide et écrit), snippets et codegen d'infrastructure idempotents, distribution par registry.
 
 ## 11. Questions ouvertes
 

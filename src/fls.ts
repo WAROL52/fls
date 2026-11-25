@@ -86,7 +86,14 @@ export async function execAndReport(args: Args, io: Io, ops: Op[], dry: boolean)
   const ws = new Workspace(io.cwd, numberArg(args, "max-size", DEFAULT_MAX_SIZE));
   const out = args.values.get("output");
   const journal = new Journal(io.cwd, DEFAULT_MAX_SIZE);
-  const results = await execute(ops, { ws, journal, ignore: loadIgnore(ws, args.ignore), output: out === undefined ? null : path.resolve(io.cwd, out) });
+  const results = await execute(ops, {
+    ws,
+    journal,
+    ignore: loadIgnore(ws, args.ignore),
+    runner: io.runner === undefined ? realRunner : io.runner,
+    env: io.env ?? {},
+    output: out === undefined ? null : path.resolve(io.cwd, out),
+  });
   const pending = ws.pending();
   const paths = [...pending.map((p) => p.rel), ...ws.newDirs().map((d) => `${d}/`)];
   const now = io.now();
@@ -219,6 +226,7 @@ const SPEC_INTRO = [
   "- toutes les directives voient l'état simulé : un @read après un @edit montre le résultat ;",
   "- après un échec d'écriture ou de vérification (@expect_*), les écritures suivantes sont SKIP mais les lectures continuent ;",
   "- chaque @edit est atomique (tous ses blocs passent ou aucun) ; les écritures réussies sont appliquées.",
+  "- @find_ast/@edit_ast (ast-grep optionnel, >=0.51) : quand la structure compte (appels, JSX, imports, signatures) ; $ARG un nœud, $$$ARGS zéro ou plusieurs ; unique par défaut, --all/--first ; --lang obligatoire pour un dossier, auto/html pour injections ; lire le disque au début du run (ast_grep_stale si fichier déjà modifié). @grep/@edit pour le texte exact.",
   "",
   "Rapport : une entrée numérotée par directive (OK, FAIL ou SKIP), puis un résumé.",
   "Codes de sortie : 0 tout OK ; 1 au moins un FAIL ; 2 erreur de syntaxe ou d'usage (rien n'a été exécuté).",
@@ -306,6 +314,19 @@ export const realRunner: Runner = {
     return r.status === 0 ? r.stdout : null;
   },
   feed: (cmd, args, text) => spawnSync(cmd, args, { input: text, stdio: ["pipe", "ignore", "ignore"] }).status === 0,
+  exec: (cmd, args, opts = {}) => {
+    const r = spawnSync(cmd, args, {
+      encoding: "utf8",
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return {
+      status: r.status,
+      stdout: r.stdout ?? "",
+      stderr: r.stderr ?? "",
+    };
+  },
 };
 
 export function createClipboard(runner: Runner): Clipboard {

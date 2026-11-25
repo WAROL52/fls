@@ -382,7 +382,7 @@ describe("@tree", () => {
     expect(r.text).toContain("    └── lib/");
     expect(r.text).not.toContain("node_modules");
     expect(r.text).not.toContain(".git");
-    expect(r.text).toContain("fls 1.4.0 | run r1 |");
+    expect(r.text).toContain("fls 1.5.0 | run r1 |");
   });
 
   it("dossier non terminal : le tronc continue", async () => {
@@ -734,7 +734,7 @@ describe("sources et sorties", () => {
   it("troncature du rapport et validation des nombres", async () => {
     const files: Files = { "a.txt": "x".repeat(500) };
     const r = await run(["a.txt", "--max-output-chars", "100"], files);
-    expect(r.text.startsWith("fls 1.4.0")).toBe(true);
+    expect(r.text.startsWith("fls 1.5.0")).toBe(true);
     expect(r.text).toMatch(/\[rapport tronqué : \d+ caractères omis/);
     for (const bad of ["0", "abc"]) {
       const e = await run(["a.txt", "--max-output-chars", bad], files);
@@ -830,7 +830,7 @@ describe("aide", () => {
   it("--help, -h, --version", async () => {
     expect((await run(["--help"])).text).toContain("fls <chemin...>");
     expect((await run(["-h"])).text).toContain("Sous-commandes".length ? "Usage :" : "");
-    expect((await run(["--version"])).text).toBe("fls 1.4.0\n");
+    expect((await run(["--version"])).text).toBe("fls 1.5.0\n");
   });
 
   it("spec contient toutes les directives et tous les codes d'erreur", async () => {
@@ -933,6 +933,7 @@ describe("presse-papiers", () => {
         calls.push(`feed:${cmd}`);
         return cmd === "pbcopy";
       },
+      exec: () => ({ status: 0, stdout: "", stderr: "" }),
     };
     const clip = fls.createClipboard(runner);
     expect(clip.read()).toBe("du texte");
@@ -942,7 +943,7 @@ describe("presse-papiers", () => {
   });
 
   it("createClipboard échoue proprement sans outil", async () => {
-    const clip = fls.createClipboard({ capture: () => null, feed: () => false });
+    const clip = fls.createClipboard({ capture: () => null, feed: () => false, exec: () => ({ status: 0, stdout: "", stderr: "" }) });
     expect(() => clip.read()).toThrow(/presse-papiers/);
     expect(() => clip.write("x")).toThrow(/presse-papiers/);
   });
@@ -954,6 +955,12 @@ describe("presse-papiers", () => {
     const eat = "process.stdin.resume();process.stdin.on('end',()=>process.exit(0))";
     expect(fls.realRunner.feed(process.execPath, ["-e", eat], "x")).toBe(true);
     expect(fls.realRunner.feed("fls-commande-inexistante", [], "x")).toBe(false);
+    const ex = fls.realRunner.exec(process.execPath, ["-e", "process.stdout.write('out');process.stderr.write('err')"]);
+    expect(ex).toEqual({ status: 0, stdout: "out", stderr: "err" });
+    const bad = fls.realRunner.exec("fls-commande-inexistante", []);
+    expect(bad.status).not.toBe(0);
+    expect(typeof bad.stdout).toBe("string");
+    expect(typeof bad.stderr).toBe("string");
   });
 });
 
@@ -1007,6 +1014,17 @@ describe("E/S réelles et point d'entrée", () => {
     const absent = path.join(os.tmpdir(), `fls-absent-${process.pid}`);
     expect(fls.isEntry(absent, pathToFileURL(absent).href)).toBe(true);
     expect(fls.isEntry(absent, pathToFileURL(path.join(os.tmpdir(), "fls-autre")).href)).toBe(false);
+  });
+
+  it("main accepte un Io sans env ni runner explicite", async () => {
+    const dir = sb({ "a.txt": "ok\n" });
+    const f = fake(dir, { stdin: '@read a.txt\n' });
+    const io = { ...f.io } as any;
+    delete io.env;
+    delete io.runner;
+    const code = await fls.main([], io);
+    expect(code).toBe(0);
+    expect(f.out.map((x) => x.toString()).join("")).toContain("ok");
   });
 
   it("le binaire fonctionne vraiment (processus réel)", async () => {

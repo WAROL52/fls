@@ -51,7 +51,8 @@ async function hunkRows(h: Hunk, p: Palette, o: StyleOptions): Promise<Line[]> {
     const mark = sign === "+" ? span("+ ", p.green) : span("- ", p.red);
     return code.flatMap((c) => bgRows(bg, [...mark, ...c], o.columns, "  "));
   };
-  return [{ spans: span(`@@ bloc ${h.block} (ligne ${h.line})`, p.cyan) }, ...(await side(h.removed, "-")), ...(await side(h.added, "+"))];
+  const where = h.file === undefined ? `ligne ${h.line}` : `${h.file}:${h.line}`;
+  return [{ spans: span(`@@ bloc ${h.block} (${where})`, p.cyan) }, ...(await side(h.removed, "-")), ...(await side(h.added, "+"))];
 }
 
 async function segmentRows(s: Segment, entry: Entry, p: Palette, o: StyleOptions): Promise<Line[]> {

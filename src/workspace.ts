@@ -79,15 +79,21 @@ export class Workspace {
     return e === undefined ? fs.readFileSync(this.resolve(rel)) : (e.data as Buffer);
   }
 
-  text(rel: string): string {
+  /** Octets validés (taille, binaire, UTF-8) : base des directives structurelles. */
+  bytes(rel: string): Buffer {
     const buf = this.get(rel);
     if (buf.length > this.maxSize) throw new FlsError("too_large", `${rel} : ${buf.length} octets > --max-size ${this.maxSize}`);
     if (buf.subarray(0, BINARY_SNIFF).includes(0)) throw new FlsError("binary_file", `${rel} est un fichier binaire`);
     try {
-      return DECODER.decode(buf);
+      DECODER.decode(buf);
     } catch {
       throw new FlsError("not_utf8", `${rel} n'est pas de l'UTF-8 valide`);
     }
+    return buf;
+  }
+
+  text(rel: string): string {
+    return DECODER.decode(this.bytes(rel));
   }
 
   modeOf(rel: string): number {

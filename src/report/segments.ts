@@ -19,6 +19,8 @@ export type MatchRow = { type: "match" | "context"; file: string; line: number; 
 export interface Hunk {
   block: number;
   line: number;
+  /** Fichier d'origine quand le diff couvre plusieurs fichiers (`@edit_ast`) ; absent pour `@edit`. */
+  file?: string;
   removed: string[];
   added: string[];
 }
