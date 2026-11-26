@@ -8,6 +8,8 @@
 
 **Bloc REWRITE** — Bloc `<<<<<<< REWRITE` / `>>>>>>> END` qui porte le remplacement de `@edit_ast` (vide = suppression). Équivalent à l'option `--rewrite` pour une seule ligne ; les deux sont exclusifs.
 
+**Ancre SEARCH** — Texte (inline ou bloc `<<<<<<< SEARCH` / `>>>>>>> END`) utilisé par `@insert` pour désigner où insérer, sans remplacement.
+
 **Script source** — Script écrit avec la syntaxe v2 (il commence par `@fls 2`) : variables, boucles, conditions, macros, interpolation. Il n'est jamais exécuté tel quel ; l'Expansion le transforme en Script plat.
 
 **Expansion** — Phase qui transforme un Script source en Script plat, avant toute exécution, en lisant le disque tel qu'il est au départ (jamais l'état simulé par le script). `fls expand` l'affiche.

@@ -36,6 +36,7 @@ function runEdit(ctx: Ctx, op: Op): Done {
   const rel = normalizeRel(op.args[0]);
   const original = ctx.ws.text(rel);
   const eol = original.includes("\r\n") ? "\r\n" : "\n";
+  const all = op.opts.all === true;
   let current = original;
   let added = 0;
   let removed = 0;
@@ -45,21 +46,28 @@ function runEdit(ctx: Ctx, op: Op): Done {
     if (found.length === 0) {
       throw new FlsError("not_found", `bloc ${n + 1} : SEARCH introuvable dans ${rel} (${closestHint(current, ed.search)})`);
     }
-    if (found.length > 1) {
+    if (!all && found.length > 1) {
       const where = found.slice(0, 5).map((p) => lineAt(current, p)).join(", ");
       throw new FlsError("ambiguous_match", `bloc ${n + 1} : SEARCH trouvé ${found.length} fois dans ${rel} (lignes ${where})`);
     }
-    const at = found[0];
     const replacement = ed.replace.replaceAll("\n", eol);
-    let end = at + search.length;
-    if (replacement === "" && (at === 0 || current[at - 1] === "\n") && current.startsWith(eol, end)) end += eol.length;
-    const line = lineAt(current, at);
-    current = current.slice(0, at) + replacement + current.slice(end);
     const gone = blockLines(ed.search);
     const come = blockLines(ed.replace);
-    removed += gone.length;
-    added += come.length;
-    return [{ block: n + 1, line, removed: gone, added: come }];
+    let next = "";
+    let cursor = 0;
+    const blockHunks: { block: number; line: number; removed: string[]; added: string[] }[] = [];
+    for (const at of found) {
+      let end = at + search.length;
+      if (replacement === "" && (at === 0 || current[at - 1] === "\n") && current.startsWith(eol, end)) end += eol.length;
+      next += current.slice(cursor, at) + replacement;
+      cursor = end;
+      removed += gone.length;
+      added += come.length;
+      blockHunks.push({ block: n + 1, line: lineAt(current, at), removed: gone, added: come });
+    }
+    next += current.slice(cursor);
+    current = next;
+    return blockHunks;
   });
   ctx.ws.write(rel, Buffer.from(current, "utf8"));
   return { title: `${rel} (${op.edits.length} bloc(s), +${added} -${removed})`, body: [{ kind: "diff", hunks }] };
@@ -67,11 +75,18 @@ function runEdit(ctx: Ctx, op: Op): Done {
 
 export const edit: Spec = directive({
   name: "edit",
-  summary: "remplace du texte existant ; chaque SEARCH doit être trouvé exactement une fois",
-  usage: "@edit <fichier>  puis un ou plusieurs blocs <<<<<<< SEARCH / ======= / >>>>>>> REPLACE",
+  summary: "remplace du texte existant ; chaque SEARCH doit être trouvé exactement une fois (ou partout avec --all)",
+  usage: "@edit <fichier> [--all]  puis un ou plusieurs blocs <<<<<<< SEARCH / ======= / >>>>>>> REPLACE",
   block: "edit",
   writes: true,
-  optionDocs: ["REPLACE vide : supprime le texte (et la ligne entière si SEARCH couvre des lignes complètes)"],
-  examples: ["@edit src/user.ts\n<<<<<<< SEARCH\n  return { id, name }\n=======\n  return { id, name, role: \"member\" }\n>>>>>>> REPLACE"],
+  options: { all: "flag" },
+  optionDocs: [
+    "--all : remplace toutes les occurrences de chaque SEARCH (sans ambiguous_match)",
+    "REPLACE vide : supprime le texte (et la ligne entière si SEARCH couvre des lignes complètes)",
+  ],
+  examples: [
+    "@edit src/user.ts\n<<<<<<< SEARCH\n  return { id, name }\n=======\n  return { id, name, role: \"member\" }\n>>>>>>> REPLACE",
+    "@edit src/user.ts --all\n<<<<<<< SEARCH\nconsole.log($x)\n=======\nlogger.info($x)\n>>>>>>> REPLACE",
+  ],
   run: runEdit,
 });

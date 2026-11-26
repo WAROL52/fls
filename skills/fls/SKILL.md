@@ -54,7 +54,7 @@ cd ~/projet && fls --clip
 ## Bonnes pratiques
 
 - **Grouper** : un seul script pour plusieurs lectures/modifications, avec des `@note` pour annoter les étapes ; le rapport garde l'ordre.
-- **`@edit` d'abord en `--dry-run`** quand le changement est risqué : `fls --dry-run` simule sans écrire. Chaque SEARCH doit être trouvé **exactement une fois** (`ambiguous_match` donne les numéros de ligne : allonger le contexte du SEARCH). Chaque `@edit` est atomique. Forme canonique (marqueurs `SEARCH`/`REPLACE`, pas des marqueurs de conflit git) :
+- **`@edit` d'abord en `--dry-run`** quand le changement est risqué : `fls --dry-run` simule sans écrire. Sans `--all`, chaque SEARCH doit être trouvé **exactement une fois** (`ambiguous_match` donne les numéros de ligne : allonger le contexte du SEARCH) ; avec `--all`, toutes ses occurrences non chevauchantes sont remplacées. Chaque `@edit` est atomique. Forme canonique (marqueurs `SEARCH`/`REPLACE`, pas des marqueurs de conflit git) :
   ```
   @edit chemin/fichier.ext
   <<<<<<< SEARCH
@@ -63,7 +63,14 @@ cd ~/projet && fls --clip
   texte de remplacement
   >>>>>>> REPLACE
   ```
-- **Quand utiliser AST vs texte** : `@grep`/`@edit` pour du texte/littéral simple, commentaires, Markdown, config, ou quand la forme exacte importe. `@find_ast`/`@edit_ast` quand la structure compte (appels, arguments, JSX, imports, wrappers, signatures) et que regex/espaces/guillemets/multi-ligne rendent `@grep`/`@edit` fragiles. Vérifier d’abord avec `@find_ast`, puis `@edit_ast --dry-run`, puis exécuter. Prérequis : `ast-grep` ≥ 0.51 (`ast-grep --version`, jamais `sg`).
+- **`@insert` pour ajouter sans remplacer** : contenu brut inséré à une position. Ancre par `--line N [--after]`, `--line N --col C`, `--eof`, ou `--before/--after "texte"` / bloc SEARCH. `--all` seulement pour ancre SEARCH. Exemple :
+  ```
+  @insert src/app.ts --before "export default"
+  <<<<<<< CONTENT
+  // header
+  >>>>>>> END
+  ```
+- **Quand utiliser AST vs texte** : `@grep`/`@edit` pour du texte/littéral simple, commentaires, Markdown, config, remplacements littéraux multi-occurrences (`@edit --all`), ou quand la forme exacte importe. `@find_ast`/`@edit_ast` quand la structure compte (appels, arguments, JSX, imports, wrappers, signatures) et que regex/espaces/guillemets/multi-ligne rendent `@grep`/`@edit` fragiles. Vérifier d’abord avec `@find_ast`, puis `@edit_ast --dry-run`, puis exécuter. Prérequis : `ast-grep` ≥ 0.51 (`ast-grep --version`, jamais `sg`).
 - **Structure (ast-grep)** : `@find_ast "<motif>" chemin --lang ts [--context N]` ; `@edit_ast "<motif>" chemin --lang ts --all|--first (--rewrite "..." | bloc <<<<<<< REWRITE)`. `$ARG` = un nœud, `$$$ARGS` = zéro ou plusieurs. Dossier = `--lang` obligatoire ; fichier unique = déduit par extension ; `.html/.htm` ou `--lang auto` = déduction/injections HTML JS/CSS. `@edit_ast` est unique par défaut (`ambiguous_match` sinon). Les directives AST lisent le disque au début du run : les placer avant les écritures sur les mêmes fichiers, sinon `ast_grep_stale`. **Lire `references/ast-grep.md` avant le premier motif non trivial.**
 - **Garder avant d'écrire** : `@expect_exists`, `@expect_missing`, `@expect_contains <fichier> "texte" [--regex] [--count N]` constatent un fait sur l'état simulé. Si l'une échoue (`expectation_failed`), les écritures suivantes sont SKIP, les lectures continuent ; ce qui a déjà été écrit n'est pas annulé (`fls undo`). Les placer avant les `@edit` ; après, elles servent à contrôler le résultat. Un texte sur plusieurs lignes ne se cherche qu'avec `--regex`.
 - **Inspecter** : `@stat <chemin>` (type, taille, lignes, droits, sha1) et `@history [chemin] [--limit N]` (runs du Journal, ou ceux qui ont touché un fichier) sont des lectures, utilisables aussi en `#@`.

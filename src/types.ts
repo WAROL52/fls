@@ -20,8 +20,12 @@ export interface Op {
   opts: Record<string, string | true>;
   edits: Edit[];
   content: string;
+  /** Ancre SEARCH de `@insert` (texte brut du bloc SEARCH). */
+  anchor: string;
   /** Un bloc `<<<<<<< REWRITE` était présent (même vide : suppression du match). */
   rewriteBlock?: boolean;
+  /** Un bloc `<<<<<<< SEARCH` ancre de `@insert` était présent. */
+  anchorBlock?: boolean;
 }
 
 /** Ce que renvoie une directive : le titre de son entrée et le corps (segments typés). */
@@ -114,10 +118,10 @@ export interface Spec {
   name: string;
   summary: string;
   usage: string;
-  options: Record<string, "flag" | "value">;
+  options: Record<string, "flag" | "value" | "optvalue">;
   aliases: Record<string, string>;
   positional: [number, number];
-  block: "none" | "edit" | "content" | "rewrite";
+  block: "none" | "edit" | "content" | "rewrite" | "insert";
   writes: boolean;
   /** Vérification : un échec bloque (SKIP) les écritures suivantes, sans rien annuler. */
   guard: boolean;

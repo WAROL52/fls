@@ -52,7 +52,7 @@ cd ~/DEV/projet && fls --clip
 
 ### Directives
 
-Lecture : `@tree`, `@read`, `@grep`, `@find_ast`, `@stat`, `@history`, `@note`. Écriture : `@edit`, `@edit_ast`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`. Vérifications : `@expect_exists`, `@expect_missing`, `@expect_contains`. Détail : `fls help <directive>`, syntaxe complète : `fls spec` (et [SPEC.md](SPEC.md)).
+Lecture : `@tree`, `@read`, `@grep`, `@find_ast`, `@stat`, `@history`, `@note`. Écriture : `@edit`, `@edit_ast`, `@insert`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`. Vérifications : `@expect_exists`, `@expect_missing`, `@expect_contains`. Détail : `fls help <directive>`, syntaxe complète : `fls spec` (et [SPEC.md](SPEC.md)).
 
 ### Recherche structurelle : `@find_ast` / `@edit_ast` (optionnel)
 
@@ -108,7 +108,7 @@ Une vérification qui échoue fait ignorer les écritures suivantes (les lecture
 
 ### Sûreté
 
-- `--dry-run` simule sans rien écrire ; chaque `@edit` est atomique et son SEARCH doit être unique ; `@edit_ast` est unique par défaut.
+- `--dry-run` simule sans rien écrire ; chaque `@edit` est atomique et son SEARCH doit être unique sans `--all` (`--all` remplace toutes les occurrences) ; `@edit_ast` est unique par défaut.
 - `@mkdir` crée des dossiers vides ; `undo` retire ceux qui sont restés vides.
 - `fls log` liste les runs, `fls undo [--run <id>] [--force]` annule ; le journal est dans `.fls/` (`fls init` le met dans `.gitignore`).
 - Chemins confinés au dossier courant ; liens symboliques, binaires et fichiers trop gros refusés.

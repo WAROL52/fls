@@ -29,7 +29,7 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 - Lecture rapide : `fls src/ lib/a.ts` (remplace `treecat`, avec ignores, limites et binaires gérés).
 - Scripts par entrée standard (heredoc), `--file`, `--clip`.
 - Sous-commandes : `expand`, `--dry-run`, `undo`, `log`, `spec`, `help`, `init`.
-- Directives : `@tree`, `@read`, `@grep`, `@note`, `@edit` (SEARCH/REPLACE), `@create`, `@overwrite`, `@write`, `@append`, `@delete`, `@move`.
+- Directives : `@tree`, `@read`, `@grep`, `@note`, `@edit` (SEARCH/REPLACE), `@insert`, `@create`, `@overwrite`, `@write`, `@append`, `@delete`, `@move`.
 - Journal et annulation de chaque run.
 
 ### Hors périmètre v1 (volontairement)
@@ -48,7 +48,7 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 | # | Exigence |
 |---|---|
 | F1 | Un script s'exécute de haut en bas ; les lectures voient l'état simulé par les écritures précédentes — sauf `@find_ast` / `@edit_ast`, qui lisent le disque au début du run et refusent un fichier déjà modifié (`ast_grep_stale`). |
-| F2 | `@edit` désigne l'endroit par le texte existant : un SEARCH doit être trouvé **exactement une fois**, sinon échec explicite (avec la ligne la plus proche ou les numéros de ligne). |
+| F2 | `@edit` désigne l'endroit par le texte existant : sans `--all`, un SEARCH doit être trouvé **exactement une fois** ; avec `--all`, toutes ses occurrences sont remplacées. En cas d'échec, message explicite (ligne la plus proche ou numéros de ligne). |
 | F3 | Chaque `@edit` est atomique ; les écritures réussies d'un script sont appliquées même si une autre échoue. |
 | F4 | Après un échec d'écriture, les écritures suivantes sont `SKIP` mais les lectures continuent (le rapport reflète l'état réel). |
 | F5 | `--dry-run` exécute le même code que l'exécution réelle, sans écrire. |
@@ -56,6 +56,7 @@ Un développeur (usage personnel d'abord), sous Linux / macOS / WSL, qui travail
 | F7 | Le rapport est un texte brut numéroté, collable tel quel ; un marqueur indique toute troncature. |
 | F8 | `fls spec` et `fls help` décrivent la syntaxe exacte (sortie générée depuis la même table que le parseur). |
 | F9 | `fls expand` affiche le script plat canonique (base de la future phase d'expansion de la v2). |
+| F10 | `@insert` insère du contenu brut à une position (ligne, ligne+colonne, fin de fichier, ou avant/après une ancre SEARCH), unicité par défaut sur SEARCH. |
 
 ## 6. Exigences non fonctionnelles
 

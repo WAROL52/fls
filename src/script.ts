@@ -76,11 +76,26 @@ function readRewrite(lines: string[], start: number, op: Op, _v2: boolean): Bloc
   return { next: body.next, templated: [] };
 }
 
+function readInsert(lines: string[], start: number, op: Op, _v2: boolean): BlockRead {
+  let i = nextNonBlank(lines, start);
+  if (lines[i] === M.searchOpen) {
+    const anchor = takeUntil(lines, i + 1, M.contentClose, op.line);
+    op.anchor = anchor.body.join("\n");
+    op.anchorBlock = true;
+    i = nextNonBlank(lines, anchor.next);
+  }
+  if (lines[i] !== M.contentOpen) throw syntaxError(op.line, `@${op.name} attend un bloc ${M.contentOpen}`);
+  const body = takeUntil(lines, i + 1, M.contentClose, op.line);
+  op.content = body.body.join("\n");
+  return { next: body.next, templated: [] };
+}
+
 export const BLOCK_READERS: Record<Spec["block"], (lines: string[], start: number, op: Op, v2: boolean) => BlockRead> = {
   none: (_lines, start) => ({ next: start, templated: [] }),
   edit: readEdits,
   content: readContent,
   rewrite: readRewrite,
+  insert: readInsert,
 };
 
 const optionName = (spec: Spec, tok: Token): string | null => {
@@ -100,7 +115,7 @@ export function opFromTokens(tokens: Token[], lineNo: number): Op {
   const [head, ...rest] = tokens;
   const spec = SPEC_BY_NAME.get(head.text.slice(1));
   if (spec === undefined) throw syntaxError(lineNo, `directive inconnue ${head.text}`);
-  const op: Op = { line: lineNo, name: spec.name, args: [], opts: {}, edits: [], content: "" };
+  const op: Op = { line: lineNo, name: spec.name, args: [], opts: {}, edits: [], content: "", anchor: "" };
   for (let i = 0; i < rest.length; i++) {
     const name = optionName(spec, rest[i]);
     if (name === null) {
@@ -111,6 +126,16 @@ export function opFromTokens(tokens: Token[], lineNo: number): Op {
     if (kind === undefined) throw syntaxError(lineNo, `option inconnue --${name} pour @${spec.name}`);
     if (kind === "flag") {
       op.opts[name] = true;
+      continue;
+    }
+    if (kind === "optvalue") {
+      const next = rest[i + 1];
+      if (next === undefined || (!next.quoted && next.text.startsWith("--"))) {
+        op.opts[name] = true;
+        continue;
+      }
+      i += 1;
+      op.opts[name] = next.text;
       continue;
     }
     i += 1;
@@ -180,7 +205,7 @@ export function parseScript(text: string): Op[] {
 }
 
 export function makeOp(name: string, args: string[]): Op {
-  return { line: 0, name, args, opts: {}, edits: [], content: "" };
+  return { line: 0, name, args, opts: {}, edits: [], content: "", anchor: "" };
 }
 
 // ───────────────────────────── Script plat (sérialisation) ─────────────────────────────
@@ -190,6 +215,10 @@ const BLOCK_WRITERS: Record<Spec["block"], (op: Op) => string[]> = {
   edit: (op) => op.edits.flatMap((e) => [M.searchOpen, ...blockLines(e.search), M.sep, ...blockLines(e.replace), M.replaceClose]),
   content: (op) => [M.contentOpen, ...blockLines(op.content.replace(/\n$/, "")), M.contentClose],
   rewrite: (op) => (op.rewriteBlock === true ? [M.rewriteOpen, ...blockLines(op.content), M.rewriteClose] : []),
+  insert: (op) => [
+    ...(op.anchorBlock === true ? [M.searchOpen, ...blockLines(op.anchor), M.contentClose] : []),
+    M.contentOpen, ...blockLines(op.content), M.contentClose,
+  ],
 };
 
 export function serializeOp(op: Op): string {

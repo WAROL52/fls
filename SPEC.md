@@ -1,6 +1,6 @@
 # SPEC — fls v1
 
-Spécification du comportement de `fls.ts` (version `1.5.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
+Spécification du comportement de `fls.ts` (version `1.7.0`). Le « pourquoi » est dans `PRD.md`. La sortie de `fls spec` et `fls help <directive>` est générée à partir de la même table de directives que le parseur : en cas de doute, le code et les tests font foi.
 
 Prérequis : Node.js ≥ 22.18 (ou 22.6+ avec `--experimental-strip-types`). Lancement : `node fls.ts …` (ou un alias vers ce fichier).
 
@@ -137,11 +137,21 @@ remplacement
 >>>>>>> END
 ```
 
+```
+@insert chemin --before|--after
+<<<<<<< SEARCH
+ancre
+>>>>>>> END
+<<<<<<< CONTENT
+contenu à insérer
+>>>>>>> END
+```
+
 - `@edit` exige au moins un bloc ; `SEARCH` ne peut pas être vide (pour créer un fichier : `@create`).
 - `@edit_ast` accepte un bloc `REWRITE` **ou** l'option `--rewrite "…"`, pas les deux. Un bloc vide supprime le match ; sans bloc ni `--rewrite` : `invalid_argument`.
 - Le premier `=======` après `SEARCH` sépare les deux moitiés ; le premier `>>>>>>> REPLACE` (resp. `>>>>>>> END`) termine le bloc. Marqueur manquant : `syntax_error`.
 - Des lignes vides sont admises entre la directive et son premier bloc, et entre les blocs.
-- Le contenu d'un bloc `CONTENT` se termine par un retour à la ligne s'il comporte au moins une ligne ; un bloc vide produit un fichier vide.
+- Le contenu d'un bloc `CONTENT` se termine par un retour à la ligne s'il comporte au moins une ligne pour `@create`, `@overwrite`, `@write`, `@append` ; un bloc vide produit un fichier vide. Pour `@insert`, le contenu est **brut** (inséré tel quel).
 
 ### 4.4 Directives acceptées sous deux formes
 
@@ -227,18 +237,19 @@ Recherche **structurelle** déléguée à `ast-grep` (binaire externe optionnel,
 
 Recopie le texte dans le rapport (`NOTE texte`). Utile pour annoter les étapes d'un script.
 
-### `@edit <fichier>` + blocs SEARCH / REPLACE
+### `@edit <fichier> [--all]` + blocs SEARCH / REPLACE
 
 Remplace du texte existant. Règles :
 
 1. Les blocs s'appliquent **dans l'ordre**, sur le contenu résultant des blocs précédents.
 2. `SEARCH` est une **sous-chaîne exacte** (les retours à la ligne internes comptent, pas le dernier) : aucune tolérance sur les espaces ou l'indentation.
-3. Il doit être trouvé **exactement une fois** : zéro → `not_found` (avec « ligne la plus proche (l.N) : … » ou « aucune ligne proche ») ; plusieurs → `ambiguous_match` (jusqu'à 5 numéros de ligne).
-4. Si le fichier contient `\r\n`, `SEARCH` et `REPLACE` sont écrits avec `\r\n` ; sinon `\n`.
-5. `REPLACE` vide supprime le texte ; si `SEARCH` couvre des **lignes entières**, la ligne (son retour à la ligne) disparaît aussi.
-6. **Atomique** : si un bloc échoue, le fichier n'est pas modifié.
+3. Sans `--all`, il doit être trouvé **exactement une fois** : zéro → `not_found` (avec « ligne la plus proche (l.N) : … » ou « aucune ligne proche ») ; plusieurs → `ambiguous_match` (jusqu'à 5 numéros de ligne).
+4. Avec `--all`, **toutes les occurrences** non chevauchantes de chaque bloc sont remplacées (ordre des blocs conservé, chaque bloc s'applique sur le contenu résultant). Zéro occurrence → `not_found` ; pas d'`ambiguous_match`.
+5. Si le fichier contient `\r\n`, `SEARCH` et `REPLACE` sont écrits avec `\r\n` ; sinon `\n`.
+6. `REPLACE` vide supprime le texte ; si `SEARCH` couvre des **lignes entières**, la ligne (son retour à la ligne) disparaît aussi, par occurrence.
+7. **Atomique** : si un bloc échoue, le fichier n'est pas modifié.
 
-Rapport : `EDIT chemin (K bloc(s), +ajoutées -retirées)` puis, par bloc, `@@ bloc k (ligne L)`, les lignes retirées préfixées `- ` et les lignes ajoutées préfixées `+ `.
+Rapport : `EDIT chemin (K bloc(s), +ajoutées -retirées)` puis, par occurrence, `@@ bloc k (ligne L)`, les lignes retirées préfixées `- ` et les lignes ajoutées préfixées `+ ` (plusieurs hunks pour un même bloc en mode `--all`).
 
 ### `@edit_ast "<motif>" [chemin] [--lang <langage>|auto] [--all | --first] [--rewrite "…"]` + bloc REWRITE
 
@@ -250,6 +261,28 @@ Réécriture **structurelle** : ast-grep calcule les matches et leurs remplaceme
 - `--lang` : mêmes règles que `@find_ast` (obligatoire pour un dossier, `auto` pour la déduction par fichier et les injections HTML).
 - Les directives AST lisent le disque **au début du run** ; un fichier déjà modifié par une directive précédente du même script donne `ast_grep_stale` (§6).
 - Rapport : `EDIT_AST "motif" dans chemin (K remplacement(s), M fichier(s))` puis un diff multi-fichiers, un bloc par match : `@@ bloc k (fichier:ligne)`, lignes retirées `- ` et ajoutées `+ `.
+
+### `@insert <fichier> <ancre> [--all]` + bloc CONTENT
+
+Insère du contenu **brut** (tel quel, sans ajout automatique de retour à la ligne final) à une position donnée. Une seule insertion par directive.
+
+**Ancres (mutuellement exclusives)** :
+
+- `--line <N> [--after]` : avant la ligne N (1-based) ; avec `--after`, après la ligne N. `N = nombre_de_lignes + 1` est accepté (fin de fichier).
+- `--line <N> --col <C>` : dans la ligne N, à la colonne C (1-based, codepoints Unicode ; `1` = avant le premier caractère, `len+1` = fin de ligne). `--after` interdit avec `--col`.
+- `--eof` : fin de fichier.
+- `--before "<texte>"` / `--after "<texte>"` : ancre SEARCH inline (texte exact). Unicité par défaut ; `--all` applique à toutes les occurrences non chevauchantes.
+- `--before` / `--after` (sans valeur) + bloc `<<<<<<< SEARCH` / `>>>>>>> END` puis bloc `<<<<<<< CONTENT` / `>>>>>>> END` : ancre SEARCH multi-ligne.
+
+**Règles** :
+
+- `--all` uniquement avec une ancre SEARCH. 0 occurrence → `not_found` ; plusieurs sans `--all` → `ambiguous_match`.
+- `--col` hors `[1, len+1]` ou ligne hors bornes → `invalid_argument`.
+- Le contenu inséré est brut : `@insert ... --line 2 --col 3` avec CONTENT `X` dans `abc` donne `abXc`.
+- Fins de ligne du contenu normalisées sur le fichier cible (`\r\n` ou `\n`).
+- **Atomique** : en cas d'échec, le fichier n'est pas modifié.
+
+Rapport : `INSERT chemin (...)` puis un hunk diff `@@ bloc 1 (ligne L)` avec les lignes ajoutées préfixées `+ ` (un hunk par occurrence en mode `--all`).
 
 ### Écritures de fichiers entiers
 
@@ -292,7 +325,7 @@ Constatent un fait sur l'état simulé (un `@expect_contains` après un `@edit` 
 
 - **Surcouche en mémoire** : toutes les directives lisent et écrivent un état simulé au-dessus du disque. Un `@read` ou un `@tree` après une écriture voit le résultat ; un dossier créé virtuellement apparaît dans l'arbre.
 - **Exception AST** : `@find_ast` et `@edit_ast` délèguent à un binaire externe qui lit le disque **au début du run**. Les fichiers modifiés par une directive précédente du même script ne sont donc pas visibles ; si ast-grep renvoie un de ces fichiers, la directive échoue avec `ast_grep_stale` (jamais de résultat ou d'écriture sur une base périmée). Les écritures calculées passent ensuite par le Workspace : dry-run, journal et undo restent valables.
-- **Politique d'échec** : un `FAIL` sur une directive d'**écriture** (`@edit`, `@edit_ast`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`) ou sur une **vérification** (`@expect_*`) fait passer les écritures suivantes en `SKIP` (code `skipped`) ; les lectures continuent. Un `FAIL` sur une lecture ne bloque rien.
+- **Politique d'échec** : un `FAIL` sur une directive d'**écriture** (`@edit`, `@edit_ast`, `@insert`, `@create`, `@overwrite`, `@write`, `@append`, `@mkdir`, `@copy`, `@delete`, `@move`) ou sur une **vérification** (`@expect_*`) fait passer les écritures suivantes en `SKIP` (code `skipped`) ; les lectures continuent. Un `FAIL` sur une lecture ne bloque rien.
 - **Commit** (hors `--dry-run`) : seuls les changements **effectifs** sont écrits (un fichier recréé à l'identique, ou créé puis supprimé dans le même script, n'est pas un changement). Chaque fichier est écrit dans un fichier temporaire `<chemin>.fls-tmp` puis renommé (atomique), avec ses permissions d'origine (644 pour un nouveau fichier).
 - **Conservation** : fins de ligne, BOM et permissions sont préservés ; un fichier non UTF-8 valide est refusé (`not_utf8`), comme un binaire (octet nul dans les 8000 premiers octets : `binary_file`) ou un fichier de plus de `--max-size` octets (`too_large`).
 
@@ -305,7 +338,7 @@ Constatent un fait sur l'état simulé (un `@expect_contains` après un `@edit` 
 ## 8. Rapport
 
 ```
-fls 1.5.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
+fls 1.7.0 | run 20261119-100000123-a1b2 | /chemin/du/projet | 2026-11-19T10:00:00.123Z
 
 [1] OK    TREE src
 …

@@ -181,7 +181,7 @@ class SourceParser {
     if (spec === undefined) throw syntaxError(line, `directive inconnue @${word}`);
     if (hash) checkHashed(word, line);
     const tokens = at(line, () => tokenizeLine(text));
-    const dummy: Op = { line, name: spec.name, args: [], opts: {}, edits: [], content: "" };
+    const dummy: Op = { line, name: spec.name, args: [], opts: {}, edits: [], content: "", anchor: "" };
     const block = BLOCK_READERS[spec.block](this.lines, this.pos, dummy, true);
     this.pos = block.next;
     const lit = (s: string): Part[] => [{ lit: s }];

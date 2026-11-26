@@ -435,7 +435,7 @@ describe("helpers ast-grep", () => {
     const ws = new Workspace(dir, 1_048_576);
     const journal = new Journal(dir);
     const base = { ws, journal, ignore: loadIgnore(ws, []), runner: fakeAst(() => ({ status: 1 })), env: {}, output: null };
-    const op = (args: string[], opts: Record<string, string | true> = {}) => ({ line: 1, name: "find_ast", args, opts, edits: [], content: "" });
+    const op = (args: string[], opts: Record<string, string | true> = {}) => ({ line: 1, name: "find_ast", args, opts, edits: [], content: "", anchor: "" });
 
     expect(() => astPath(base as never, op(["x", "missing.ts"]))).toThrow(/introuvable/);
     expect(() => astPath(base as never, op(["x", "."]))).toThrow(/--lang est requis/);
@@ -468,7 +468,7 @@ describe("helpers ast-grep", () => {
     const ws = new Workspace(dir, 1_048_576);
     const journal = new Journal(dir);
     const ctx = { ws, journal, ignore: loadIgnore(ws, []), runner: fakeAst(() => ({ status: 1 })), env: {}, output: null } as never;
-    const op = { line: 1, name: "find_ast", args: ["x", "a.ts"], opts: {}, edits: [], content: "" } as never;
+    const op = { line: 1, name: "find_ast", args: ["x", "a.ts"], opts: {}, edits: [], content: "", anchor: "" } as never;
 
     expect(resolveAstGrep(ctx)).toBe("ast-grep");
     expect(() => runAstGrep({ ...ctx, runner: fakeAst(() => ({ status: null, stdout: "", stderr: "boom" })) } as never, op, null)).toThrow(/impossible d'exécuter/);

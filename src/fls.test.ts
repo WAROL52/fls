@@ -382,7 +382,7 @@ describe("@tree", () => {
     expect(r.text).toContain("    └── lib/");
     expect(r.text).not.toContain("node_modules");
     expect(r.text).not.toContain(".git");
-    expect(r.text).toContain("fls 1.5.0 | run r1 |");
+    expect(r.text).toContain("fls 1.7.0 | run r1 |");
   });
 
   it("dossier non terminal : le tronc continue", async () => {
@@ -553,6 +553,145 @@ describe("@edit", () => {
   it("erreurs de fichier", async () => {
     expect((await script(edit("nope.txt", "a", "b"))).text).toContain("not_found");
     expect((await script(edit("bin", "a", "b"), { bin: Buffer.from([0, 1]) })).text).toContain("binary_file");
+  });
+
+  it("--all remplace toutes les occurrences", async () => {
+    const r = await script("@edit f.txt --all\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n", { "f.txt": "x\nx\nz\n" });
+    expect(r.code).toBe(0);
+    expect(read(r.dir, "f.txt")).toBe("y\ny\nz\n");
+    expect(r.text).toContain("EDIT f.txt (1 bloc(s), +2 -2)");
+    expect(r.text).toContain("@@ bloc 1 (ligne 1)");
+    expect(r.text).toContain("@@ bloc 1 (ligne 2)");
+  });
+
+  it("--all sur plusieurs blocs, appliqué dans l'ordre", async () => {
+    const text =
+      "@edit f.txt --all\n<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nb\n=======\nc\n>>>>>>> REPLACE\n";
+    const r = await script(text, { "f.txt": "a\na\n" });
+    expect(r.code).toBe(0);
+    expect(read(r.dir, "f.txt")).toBe("c\nc\n");
+    expect(r.text).toContain("(2 bloc(s), +4 -4)");
+  });
+
+  it("--all : 0 occurrence reste not_found", async () => {
+    const r = await script("@edit f.txt --all\n<<<<<<< SEARCH\nzzz\n=======\nx\n>>>>>>> REPLACE\n", { "f.txt": "a\n" });
+    expect(r.code).toBe(1);
+    expect(r.text).toContain("not_found");
+  });
+
+  it("--all : suppression de ligne entière par occurrence", async () => {
+    const r = await script("@edit f.txt --all\n<<<<<<< SEARCH\nb\n=======\n\n>>>>>>> REPLACE\n", { "f.txt": "a\nb\nb\nc\n" });
+    expect(r.code).toBe(0);
+    expect(read(r.dir, "f.txt")).toBe("a\nc\n");
+  });
+
+  it("--all conserve CRLF", async () => {
+    const r = await script("@edit f.txt --all\n<<<<<<< SEARCH\na\n=======\nA\n>>>>>>> REPLACE\n", { "f.txt": "a\r\na\r\nb\r\n" });
+    expect(r.code).toBe(0);
+    expect(read(r.dir, "f.txt")).toBe("A\r\nA\r\nb\r\n");
+  });
+
+  it("--all atomique sur échec d'un bloc", async () => {
+    const text = "@edit f.txt --all\n<<<<<<< SEARCH\na\n=======\nA\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nzzz\n=======\nx\n>>>>>>> REPLACE\n";
+    const r = await script(text, { "f.txt": "a\na\n" });
+    expect(r.code).toBe(1);
+    expect(read(r.dir, "f.txt")).toBe("a\na\n");
+  });
+});
+
+describe("@insert", () => {
+  it("insère avant une ligne", async () => {
+    const r = await script('@insert f.txt --line 2\n<<<<<<< CONTENT\nX\n\n>>>>>>> END\n', { "f.txt": "a\nb\nc\n" });
+    expect(r.code).toBe(0);
+    expect(read(r.dir, "f.txt")).toBe("a\nX\nb\nc\n");
+    expect(r.text).toContain("INSERT f.txt (avant ligne 2, +1 ligne(s))");
+  });
+
+  it("insère après une ligne", async () => {
+    const r = await script('@insert f.txt --line 2 --after\n<<<<<<< CONTENT\nX\n\n>>>>>>> END\n', { "f.txt": "a\nb\nc\n" });
+    expect(read(r.dir, "f.txt")).toBe("a\nb\nX\nc\n");
+  });
+
+  it("insère à ligne+colonne (brut)", async () => {
+    const r = await script('@insert f.txt --line 1 --col 3\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "abc\n" });
+    expect(read(r.dir, "f.txt")).toBe("abXc\n");
+  });
+
+  it("insère en fin de fichier", async () => {
+    const r = await script('@insert f.txt --eof\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a\n" });
+    expect(read(r.dir, "f.txt")).toBe("a\nX");
+  });
+
+  it("ancre SEARCH inline avant/après", async () => {
+    const before = await script('@insert f.txt --before "b"\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "abc\n" });
+    expect(read(before.dir, "f.txt")).toBe("aXbc\n");
+    const after = await script('@insert f.txt --after "b"\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "abc\n" });
+    expect(read(after.dir, "f.txt")).toBe("abXc\n");
+  });
+
+  it("ancre SEARCH en bloc", async () => {
+    const r = await script('@insert f.txt --after\n<<<<<<< SEARCH\nb\n>>>>>>> END\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a\nb\nc\n" });
+    expect(read(r.dir, "f.txt")).toBe("a\nbX\nc\n");
+  });
+
+  it("--all sur ancre SEARCH", async () => {
+    const r = await script('@insert f.txt --before "b" --all\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "b1\nb2\n" });
+    expect(r.code).toBe(0);
+    expect(read(r.dir, "f.txt")).toBe("Xb1\nXb2\n");
+    expect(r.text).toContain("2 insertion(s)");
+  });
+
+  it("erreurs d'ancre et de bornes", async () => {
+    expect((await script('@insert f.txt --line 1\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).text).toContain("not_found");
+    expect((await script('@insert f.txt --line 5\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a\n" })).text).toContain("invalid_argument");
+    expect((await script('@insert f.txt --line 1 --col 9\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "abc\n" })).text).toContain("invalid_argument");
+    expect((await script('@insert f.txt --before "x"\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "x\nx\n" })).text).toContain("ambiguous_match");
+    expect((await script('@insert f.txt --before "zzz"\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a\n" })).text).toContain("not_found");
+  });
+
+  it("validation des options", async () => {
+    const bad = async (s: string, f: Record<string, string> = { "f.txt": "a\n" }) => (await script(s, f)).text;
+    expect(await bad('@insert f.txt\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("exactement une ancre");
+    expect(await bad('@insert f.txt --eof --line 1\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("exactement une ancre");
+    expect(await bad('@insert f.txt --line 1 --before "a"\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("exactement une ancre");
+    expect(await bad('@insert f.txt --line 1 --after --col 1\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("--after est interdit avec --col");
+    expect(await bad('@insert f.txt --line 1 --col 1 --before "a"\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("exactement une ancre");
+    expect(await bad('@insert f.txt --eof --all\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("--all n'est utilisable qu'avec une ancre SEARCH");
+    expect(await bad('@insert f.txt --eof --after\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("incompatible avec --eof");
+    expect(await bad('@insert f.txt --before --after\n<<<<<<< SEARCH\na\n>>>>>>> END\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("exclusifs");
+    expect(await bad('@insert f.txt --before\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("sans valeur exige un bloc SEARCH");
+    expect(await bad('@insert f.txt --before "a"\n<<<<<<< SEARCH\na\n>>>>>>> END\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("texte ou un bloc SEARCH, pas les deux");
+    expect(await bad('@insert f.txt --line 0\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("--line attend un entier >= 1");
+    expect(await bad('@insert f.txt --line 1 --col 0\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("--col attend un entier >= 1");
+  });
+
+  it("cas limites", async () => {
+    const eofEmpty = await script('@insert f.txt --eof\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "" });
+    expect(read(eofEmpty.dir, "f.txt")).toBe("X");
+    const lineEnd = await script('@insert f.txt --line 2\n<<<<<<< CONTENT\nX\n\n>>>>>>> END\n', { "f.txt": "a\n" });
+    expect(read(lineEnd.dir, "f.txt")).toBe("a\nX\n");
+    const crlf = await script('@insert f.txt --line 2\n<<<<<<< CONTENT\nX\n\n>>>>>>> END\n', { "f.txt": "a\r\nb\r\n" });
+    expect(read(crlf.dir, "f.txt")).toBe("a\r\nX\r\nb\r\n");
+    const onEmpty = await script('@insert f.txt --line 1\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "" });
+    expect(read(onEmpty.dir, "f.txt")).toBe("X");
+    const afterLastNoNl = await script('@insert f.txt --line 1 --after\n<<<<<<< CONTENT\n\nX\n>>>>>>> END\n', { "f.txt": "a" });
+    expect(read(afterLastNoNl.dir, "f.txt")).toBe("a\nX");
+    const afterPast = await script('@insert f.txt --line 2 --after\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a\n" });
+    expect(read(afterPast.dir, "f.txt")).toBe("a\nX");
+    const afterPastEnd = await script('@insert f.txt --line 3 --after\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a\n" });
+    expect(read(afterPastEnd.dir, "f.txt")).toBe("a\nX");
+    const eofNoNl = await script('@insert f.txt --eof\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a" });
+    expect(read(eofNoNl.dir, "f.txt")).toBe("aX");
+  });
+
+  it("erreurs complémentaires", async () => {
+    const bad = async (s: string, f: Record<string, string> = { "f.txt": "a\n" }) => { const r = await script(s, f); return r.text + r.errText; };
+    expect(await bad('@insert f.txt --line 1 --before\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("incompatible avec --line");
+    expect(await bad('@insert f.txt --col 1 --eof\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("--col exige --line");
+    expect(await bad('@insert f.txt\n<<<<<<< SEARCH\na\n>>>>>>> END\n<<<<<<< CONTENT\nX\n>>>>>>> END\n')).toContain("ancre SEARCH exige --before ou --after");
+    expect(await bad('@insert f.txt --line 3 --col 1\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a\n" })).toContain("col exige une ligne existante");
+    expect(await bad('@insert f.txt --before ""\n<<<<<<< CONTENT\nX\n>>>>>>> END\n', { "f.txt": "a\n" })).toContain("ancre SEARCH ne peut pas être vide");
+    expect(await bad('@insert f.txt --line 1\n')).toContain("attend un bloc <<<<<<< CONTENT");
   });
 });
 
@@ -734,7 +873,7 @@ describe("sources et sorties", () => {
   it("troncature du rapport et validation des nombres", async () => {
     const files: Files = { "a.txt": "x".repeat(500) };
     const r = await run(["a.txt", "--max-output-chars", "100"], files);
-    expect(r.text.startsWith("fls 1.5.0")).toBe(true);
+    expect(r.text.startsWith("fls 1.7.0")).toBe(true);
     expect(r.text).toMatch(/\[rapport tronqué : \d+ caractères omis/);
     for (const bad of ["0", "abc"]) {
       const e = await run(["a.txt", "--max-output-chars", bad], files);
@@ -830,7 +969,7 @@ describe("aide", () => {
   it("--help, -h, --version", async () => {
     expect((await run(["--help"])).text).toContain("fls <chemin...>");
     expect((await run(["-h"])).text).toContain("Sous-commandes".length ? "Usage :" : "");
-    expect((await run(["--version"])).text).toBe("fls 1.5.0\n");
+    expect((await run(["--version"])).text).toBe("fls 1.7.0\n");
   });
 
   it("spec contient toutes les directives et tous les codes d'erreur", async () => {
